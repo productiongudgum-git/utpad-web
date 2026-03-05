@@ -4,4 +4,5 @@ export const environment = {
   tokenRefreshBufferSeconds: 60,
   sessionTimeoutMinutes: 30,
   maxConcurrentSessions: 3,
+  useMockData: false,
 };
