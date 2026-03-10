@@ -261,19 +261,10 @@ export class OperationsLiveService {
     };
   });
 
-  private readonly channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(CHANNEL_KEY) : null;
   private readonly opsApiUrl = `${environment.apiBaseUrl}/ops`;
   private eventSource: EventSource | null = null;
-  private syncingFromChannel = false;
 
   constructor() {
-    this.restoreState();
-    this.channel?.addEventListener('message', (message: MessageEvent<PersistedOpsState>) => {
-      this.syncingFromChannel = true;
-      this.applyPersistedState(message.data);
-      this.syncingFromChannel = false;
-    });
-
     void this.bootstrapWorkersFromBackend();
     void this.bootstrapFromBackend();
     this.connectEventStream();
@@ -295,7 +286,6 @@ export class OperationsLiveService {
     };
 
     this._workers.update((workers) => [worker, ...workers]);
-    this.persistState();
     void this.createWorkerInBackend(worker);
     return worker;
   }
@@ -306,13 +296,12 @@ export class OperationsLiveService {
       workers.map((worker) =>
         worker.id === workerId
           ? {
-              ...worker,
-              allowedModules: nextModules.length > 0 ? nextModules : worker.allowedModules,
-            }
+            ...worker,
+            allowedModules: nextModules.length > 0 ? nextModules : worker.allowedModules,
+          }
           : worker,
       ),
     );
-    this.persistState();
     void this.updateWorkerAccessInBackend(workerId, nextModules);
   }
 
@@ -320,7 +309,6 @@ export class OperationsLiveService {
     this._workers.update((workers) =>
       workers.map((worker) => (worker.id === workerId ? { ...worker, active } : worker)),
     );
-    this.persistState();
     void this.updateWorkerActiveInBackend(workerId, active);
   }
 
@@ -432,7 +420,6 @@ export class OperationsLiveService {
       }));
 
       this._workers.set(normalizedWorkers);
-      this.persistState();
     } catch {
       // Use local defaults if workers endpoint is unavailable.
     }
@@ -565,7 +552,6 @@ export class OperationsLiveService {
 
       this._events.set(merged);
       this.recomputeDerivedState();
-      this.persistState();
     } catch {
       // Fallback to cached/local state if backend is not available.
     }
@@ -587,9 +573,6 @@ export class OperationsLiveService {
     });
 
     this.recomputeDerivedState();
-    if (persist) {
-      this.persistState();
-    }
   }
 
   private recomputeDerivedState(): void {
@@ -756,48 +739,5 @@ export class OperationsLiveService {
 
   private isKnownModule(module: string): module is WorkerModule {
     return MODULES.includes(module as WorkerModule);
-  }
-
-  private persistState(): void {
-    if (this.syncingFromChannel) {
-      return;
-    }
-
-    const payload: PersistedOpsState = {
-      workers: this._workers(),
-      events: this._events(),
-    };
-
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-    this.channel?.postMessage(payload);
-  }
-
-  private restoreState(): void {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return;
-    }
-
-    try {
-      const parsed = JSON.parse(raw) as PersistedOpsState;
-      this.applyPersistedState(parsed);
-      this.recomputeDerivedState();
-    } catch {
-      localStorage.removeItem(STORAGE_KEY);
-    }
-  }
-
-  private applyPersistedState(state: PersistedOpsState): void {
-    if (!state || !Array.isArray(state.workers) || !Array.isArray(state.events)) {
-      return;
-    }
-
-    this._workers.set(state.workers);
-    this._events.set(
-      state.events
-        .filter((event) => this.isKnownModule(event.module))
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        .slice(0, 400),
-    );
   }
 }

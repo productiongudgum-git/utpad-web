@@ -65,38 +65,21 @@ export class AuthService {
 
   // ── Authentication ───────────────────────────
 
-  loginWithEmail(email: string, password: string): Observable<LoginEmailResponse> {
+  loginWithPhone(phone: string, pin: string): Observable<LoginSuccessResponse> {
     this._isLoading.set(true);
-    const request: LoginEmailRequest = {
-      email,
-      password,
+
+    // We send phone and pin to our new endpoints.
+    // The previous implementation used email/password DTOs, but we will adjust the payload.
+    const request = {
+      phone,
+      pin,
       deviceInfo: {
         deviceType: 'web',
         userAgent: navigator.userAgent,
-        ipAddress: '', // Server determines this
       },
     };
 
-    return this.http.post<LoginEmailResponse>(`${this.apiUrl}/login/email`, request).pipe(
-      tap((response) => {
-        if (isLoginSuccess(response)) {
-          this.handleLoginSuccess(response);
-        }
-        // If requires2FA, caller handles the tempToken
-        this._isLoading.set(false);
-      }),
-      catchError((err) => {
-        this._isLoading.set(false);
-        return throwError(() => err);
-      })
-    );
-  }
-
-  verify2FA(tempToken: string, totpCode: string): Observable<TwoFactorVerifyResponse> {
-    this._isLoading.set(true);
-    const request: TwoFactorVerifyRequest = { tempToken, totpCode };
-
-    return this.http.post<TwoFactorVerifyResponse>(`${this.apiUrl}/2fa/verify`, request).pipe(
+    return this.http.post<LoginSuccessResponse>(`${this.apiUrl}/login/phone`, request).pipe(
       tap((response) => {
         this.handleLoginSuccess(response);
         this._isLoading.set(false);

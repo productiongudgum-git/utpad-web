@@ -1,4 +1,7 @@
-import { Injectable, computed, signal } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { environment } from '../../../environments/environment';
+import { Observable, tap } from 'rxjs';
 
 export type IngredientUnit = 'kg' | 'L' | 'g' | 'ml' | 'pcs' | 'boxes';
 
@@ -22,7 +25,7 @@ export interface RecipeDefinition {
   description: string;
   active: boolean;
   flavorIds: string[];
-  ingredients: RecipeIngredientLine[];
+  ingredientLines: RecipeIngredientLine[]; // changed from ingredients to match backend API
   updatedAt: string;
 }
 
@@ -33,12 +36,6 @@ export interface FlavorDefinition {
   active: boolean;
   recipeId: string | null;
   createdAt: string;
-}
-
-interface PersistedMasterData {
-  ingredients: IngredientDefinition[];
-  recipes: RecipeDefinition[];
-  flavors: FlavorDefinition[];
 }
 
 interface CreateIngredientInput {
@@ -57,80 +54,14 @@ interface CreateRecipeInput {
   description: string;
 }
 
-const STORAGE_KEY = 'utpad_recipe_master_data_v1';
-const CHANNEL_KEY = 'utpad_recipe_master_data_channel';
-
-const seededIngredients: IngredientDefinition[] = [
-  { id: 'ing-gum-base-a', name: 'Gum Base A', unit: 'kg', active: true, createdAt: new Date().toISOString() },
-  { id: 'ing-glucose-syrup', name: 'Glucose Syrup', unit: 'kg', active: true, createdAt: new Date().toISOString() },
-  { id: 'ing-spearmint-oil', name: 'Spearmint Oil', unit: 'kg', active: true, createdAt: new Date().toISOString() },
-  { id: 'ing-sugar-fine', name: 'Sugar (Fine)', unit: 'kg', active: true, createdAt: new Date().toISOString() },
-  { id: 'ing-sweetener-x', name: 'Sweetener X', unit: 'kg', active: true, createdAt: new Date().toISOString() },
-  { id: 'ing-coloring-blue', name: 'Coloring Blue', unit: 'L', active: true, createdAt: new Date().toISOString() },
-  { id: 'ing-preservative', name: 'Preservative', unit: 'kg', active: true, createdAt: new Date().toISOString() },
-];
-
-const seededRecipes: RecipeDefinition[] = [
-  {
-    id: 'rcp-spearmint',
-    name: 'Spearmint Base Recipe',
-    code: 'RCP-MNT',
-    description: 'Primary mint profile used for standard production runs.',
-    active: true,
-    flavorIds: ['flv-mnt'],
-    ingredients: [
-      { ingredientId: 'ing-gum-base-a', qty: 50 },
-      { ingredientId: 'ing-glucose-syrup', qty: 25.5 },
-      { ingredientId: 'ing-spearmint-oil', qty: 1.2 },
-      { ingredientId: 'ing-sugar-fine', qty: 23.3 },
-    ],
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'rcp-bubblegum',
-    name: 'Bubblegum Core Recipe',
-    code: 'RCP-BBG',
-    description: 'Sweet bubblegum profile tuned for high-volume output.',
-    active: true,
-    flavorIds: ['flv-bbg'],
-    ingredients: [
-      { ingredientId: 'ing-gum-base-a', qty: 49.5 },
-      { ingredientId: 'ing-glucose-syrup', qty: 27 },
-      { ingredientId: 'ing-sweetener-x', qty: 2.5 },
-      { ingredientId: 'ing-sugar-fine', qty: 21 },
-    ],
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'rcp-fruit',
-    name: 'Fruit Fusion Recipe',
-    code: 'RCP-FRT',
-    description: 'Base profile for strawberry and watermelon flavors.',
-    active: true,
-    flavorIds: ['flv-str', 'flv-wtr'],
-    ingredients: [
-      { ingredientId: 'ing-gum-base-a', qty: 48 },
-      { ingredientId: 'ing-glucose-syrup', qty: 26 },
-      { ingredientId: 'ing-sweetener-x', qty: 3 },
-      { ingredientId: 'ing-coloring-blue', qty: 1 },
-      { ingredientId: 'ing-sugar-fine', qty: 22 },
-    ],
-    updatedAt: new Date().toISOString(),
-  },
-];
-
-const seededFlavors: FlavorDefinition[] = [
-  { id: 'flv-mnt', name: 'Spearmint Blast', code: 'MNT', active: true, recipeId: 'rcp-spearmint', createdAt: new Date().toISOString() },
-  { id: 'flv-bbg', name: 'Bubblegum Classic', code: 'BBG', active: true, recipeId: 'rcp-bubblegum', createdAt: new Date().toISOString() },
-  { id: 'flv-str', name: 'Strawberry Fusion', code: 'STR', active: true, recipeId: 'rcp-fruit', createdAt: new Date().toISOString() },
-  { id: 'flv-wtr', name: 'Watermelon Wave', code: 'WTR', active: true, recipeId: 'rcp-fruit', createdAt: new Date().toISOString() },
-];
-
 @Injectable({ providedIn: 'root' })
 export class RecipeMasterDataService {
-  private readonly _ingredients = signal<IngredientDefinition[]>(seededIngredients);
-  private readonly _recipes = signal<RecipeDefinition[]>(seededRecipes);
-  private readonly _flavors = signal<FlavorDefinition[]>(seededFlavors);
+  private readonly http = inject(HttpClient);
+  private readonly apiUrl = `${environment.apiBaseUrl}/recipes`;
+
+  private readonly _ingredients = signal<IngredientDefinition[]>([]);
+  private readonly _recipes = signal<RecipeDefinition[]>([]);
+  private readonly _flavors = signal<FlavorDefinition[]>([]);
 
   readonly ingredients = this._ingredients.asReadonly();
   readonly recipes = this._recipes.asReadonly();
@@ -148,185 +79,172 @@ export class RecipeMasterDataService {
     this._recipes().filter((recipe) => recipe.active),
   );
 
-  private readonly channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(CHANNEL_KEY) : null;
-  private syncingFromChannel = false;
-
   constructor() {
-    this.restore();
-    this.normalizeMappings(false);
+    this.refreshAll();
+  }
 
-    this.channel?.addEventListener('message', (event: MessageEvent<PersistedMasterData>) => {
-      this.syncingFromChannel = true;
-      this.applyState(event.data, false);
-      this.syncingFromChannel = false;
+  refreshAll(): void {
+    this.http.get<{ items: IngredientDefinition[] }>(`${this.apiUrl}/ingredients`).subscribe(res => {
+      this._ingredients.set(res.items || []);
+    });
+
+    this.http.get<{ items: FlavorDefinition[] }>(`${this.apiUrl}/flavors`).subscribe(res => {
+      this._flavors.set(res.items || []);
+      this.normalizeMappings();
+    });
+
+    this.http.get<{ items: Omit<RecipeDefinition, 'flavorIds'>[] }>(this.apiUrl).subscribe(res => {
+      // Map API array to include flavorIds
+      const items = (res.items || []).map(r => ({ ...r, flavorIds: [] as string[] }));
+      this._recipes.set(items as any);
+      this.normalizeMappings();
     });
   }
 
-  createIngredient(input: CreateIngredientInput): IngredientDefinition {
-    const ingredient: IngredientDefinition = {
-      id: crypto.randomUUID(),
+  createIngredient(input: CreateIngredientInput): Observable<IngredientDefinition> {
+    const payload = {
       name: input.name.trim(),
       unit: input.unit,
       active: true,
-      createdAt: new Date().toISOString(),
     };
-    this._ingredients.update((list) => [ingredient, ...list]);
-    this.persist();
-    return ingredient;
-  }
-
-  updateIngredient(ingredientId: string, patch: Partial<Pick<IngredientDefinition, 'name' | 'unit' | 'active'>>): void {
-    this._ingredients.update((list) =>
-      list.map((ingredient) =>
-        ingredient.id === ingredientId
-          ? {
-              ...ingredient,
-              name: patch.name?.trim() || ingredient.name,
-              unit: patch.unit ?? ingredient.unit,
-              active: patch.active ?? ingredient.active,
-            }
-          : ingredient,
-      ),
+    return this.http.post<IngredientDefinition>(`${this.apiUrl}/ingredients`, payload).pipe(
+      tap((ingredient) => {
+        this._ingredients.update((list) => [...list, ingredient].sort((a, b) => a.name.localeCompare(b.name)));
+      })
     );
-    this.persist();
   }
 
-  createFlavor(input: CreateFlavorInput): FlavorDefinition {
-    const flavor: FlavorDefinition = {
-      id: crypto.randomUUID(),
+  updateIngredient(ingredientId: string, patch: Partial<Pick<IngredientDefinition, 'name' | 'unit' | 'active'>>): Observable<IngredientDefinition> {
+    const current = this._ingredients().find(i => i.id === ingredientId);
+    if (!current) throw new Error('Ingredient not found');
+
+    // For simplicity with the existing API, we do an upsert via POST
+    const payload = {
+      ...current,
+      name: patch.name?.trim() || current.name,
+      unit: patch.unit ?? current.unit,
+      active: patch.active ?? current.active,
+    };
+
+    return this.http.post<IngredientDefinition>(`${this.apiUrl}/ingredients`, payload).pipe(
+      tap((ingredient) => {
+        this._ingredients.update((list) => list.map(i => i.id === ingredient.id ? ingredient : i));
+      })
+    );
+  }
+
+  createFlavor(input: CreateFlavorInput): Observable<FlavorDefinition> {
+    const payload = {
       name: input.name.trim(),
       code: input.code.trim().toUpperCase(),
       active: true,
       recipeId: null,
-      createdAt: new Date().toISOString(),
     };
-    this._flavors.update((list) => [flavor, ...list]);
-    this.persist();
-    return flavor;
-  }
-
-  updateFlavor(flavorId: string, patch: Partial<Pick<FlavorDefinition, 'name' | 'code' | 'active'>>): void {
-    this._flavors.update((list) =>
-      list.map((flavor) =>
-        flavor.id === flavorId
-          ? {
-              ...flavor,
-              name: patch.name?.trim() || flavor.name,
-              code: patch.code?.trim().toUpperCase() || flavor.code,
-              active: patch.active ?? flavor.active,
-            }
-          : flavor,
-      ),
+    return this.http.post<FlavorDefinition>(`${this.apiUrl}/flavors`, payload).pipe(
+      tap((flavor) => {
+        this._flavors.update((list) => [...list, flavor].sort((a, b) => a.name.localeCompare(b.name)));
+      })
     );
-    this.persist();
   }
 
-  createRecipe(input: CreateRecipeInput): RecipeDefinition {
-    const recipe: RecipeDefinition = {
-      id: crypto.randomUUID(),
+  updateFlavor(flavorId: string, patch: Partial<Pick<FlavorDefinition, 'name' | 'code' | 'active'>>): Observable<FlavorDefinition> {
+    const current = this._flavors().find(f => f.id === flavorId);
+    if (!current) throw new Error('Flavor not found');
+
+    const payload = {
+      ...current,
+      name: patch.name?.trim() || current.name,
+      code: patch.code?.trim().toUpperCase() || current.code,
+      active: patch.active ?? current.active,
+    };
+
+    return this.http.post<FlavorDefinition>(`${this.apiUrl}/flavors`, payload).pipe(
+      tap((flavor) => {
+        this._flavors.update((list) => list.map(f => f.id === flavor.id ? flavor : f));
+      })
+    );
+  }
+
+  createRecipe(input: CreateRecipeInput): Observable<RecipeDefinition> {
+    const payload = {
       name: input.name.trim(),
       code: input.code.trim().toUpperCase(),
       description: input.description.trim(),
       active: true,
-      flavorIds: [],
-      ingredients: [],
-      updatedAt: new Date().toISOString(),
+      ingredientLines: [],
     };
-    this._recipes.update((list) => [recipe, ...list]);
-    this.persist();
-    return recipe;
+    return this.http.post<RecipeDefinition>(this.apiUrl, payload).pipe(
+      tap((recipe) => {
+        recipe.flavorIds = [];
+        this._recipes.update((list) => [...list, recipe].sort((a, b) => a.name.localeCompare(b.name)));
+      })
+    );
   }
 
-  updateRecipe(recipeId: string, patch: Partial<Pick<RecipeDefinition, 'name' | 'code' | 'description' | 'active'>>): void {
-    this._recipes.update((list) =>
-      list.map((recipe) =>
-        recipe.id === recipeId
-          ? {
-              ...recipe,
-              name: patch.name?.trim() || recipe.name,
-              code: patch.code?.trim().toUpperCase() || recipe.code,
-              description: patch.description?.trim() ?? recipe.description,
-              active: patch.active ?? recipe.active,
-              updatedAt: new Date().toISOString(),
-            }
-          : recipe,
-      ),
+  updateRecipe(recipeId: string, patch: Partial<Pick<RecipeDefinition, 'name' | 'code' | 'description' | 'active'>>): Observable<RecipeDefinition> {
+    const current = this._recipes().find(r => r.id === recipeId);
+    if (!current) throw new Error('Recipe not found');
+
+    const payload = {
+      ...current,
+      name: patch.name?.trim() || current.name,
+      code: patch.code?.trim().toUpperCase() || current.code,
+      description: patch.description?.trim() ?? current.description,
+      active: patch.active ?? current.active,
+    };
+
+    return this.http.post<RecipeDefinition>(this.apiUrl, payload).pipe(
+      tap((recipe) => {
+        recipe.flavorIds = current.flavorIds || [];
+        this._recipes.update((list) => list.map(r => r.id === recipe.id ? recipe : r));
+      })
     );
-    this.persist();
   }
 
-  mapFlavorToRecipe(flavorId: string, recipeId: string | null): void {
-    this._flavors.update((list) =>
-      list.map((flavor) => (flavor.id === flavorId ? { ...flavor, recipeId } : flavor)),
+  mapFlavorToRecipe(flavorId: string, recipeId: string | null): Observable<FlavorDefinition> {
+    const current = this._flavors().find(f => f.id === flavorId);
+    if (!current) throw new Error('Flavor not found');
+
+    const payload = { ...current, recipeId };
+    return this.http.post<FlavorDefinition>(`${this.apiUrl}/flavors`, payload).pipe(
+      tap((flavor) => {
+        this._flavors.update((list) => list.map(f => f.id === flavor.id ? flavor : f));
+        this.normalizeMappings();
+      })
     );
-
-    this._recipes.update((list) =>
-      list.map((recipe) => {
-        const mappedIds = this._flavors()
-          .filter((flavor) => flavor.recipeId === recipe.id)
-          .map((flavor) => flavor.id);
-
-        if (recipe.id === recipeId) {
-          const next = new Set([...mappedIds, flavorId]);
-          return { ...recipe, flavorIds: Array.from(next), updatedAt: new Date().toISOString() };
-        }
-
-        if (recipe.flavorIds.includes(flavorId)) {
-          return {
-            ...recipe,
-            flavorIds: recipe.flavorIds.filter((id) => id !== flavorId),
-            updatedAt: new Date().toISOString(),
-          };
-        }
-
-        return { ...recipe, flavorIds: mappedIds };
-      }),
-    );
-
-    this.persist();
   }
 
-  upsertRecipeIngredient(recipeId: string, ingredientId: string, qty: number): void {
+  upsertRecipeIngredient(recipeId: string, ingredientId: string, qty: number): Observable<RecipeDefinition> {
+    const current = this._recipes().find(r => r.id === recipeId);
+    if (!current) throw new Error('Recipe not found');
+
     const safeQty = Number.isFinite(qty) ? Math.max(0, qty) : 0;
+    const hasIngredient = current.ingredientLines.some(l => l.ingredientId === ingredientId);
+    const lines = hasIngredient
+      ? current.ingredientLines.map(l => l.ingredientId === ingredientId ? { ...l, qty: safeQty } : l)
+      : [...current.ingredientLines, { ingredientId, qty: safeQty }];
 
-    this._recipes.update((recipes) =>
-      recipes.map((recipe) => {
-        if (recipe.id !== recipeId) {
-          return recipe;
-        }
-
-        const hasIngredient = recipe.ingredients.some((item) => item.ingredientId === ingredientId);
-        const ingredients = hasIngredient
-          ? recipe.ingredients.map((item) =>
-              item.ingredientId === ingredientId ? { ...item, qty: safeQty } : item,
-            )
-          : [...recipe.ingredients, { ingredientId, qty: safeQty }];
-
-        return {
-          ...recipe,
-          ingredients,
-          updatedAt: new Date().toISOString(),
-        };
-      }),
+    const payload = { ...current, ingredientLines: lines };
+    return this.http.post<RecipeDefinition>(this.apiUrl, payload).pipe(
+      tap((recipe) => {
+        recipe.flavorIds = current.flavorIds || [];
+        this._recipes.update((list) => list.map(r => r.id === recipe.id ? recipe : r));
+      })
     );
-
-    this.persist();
   }
 
-  removeRecipeIngredient(recipeId: string, ingredientId: string): void {
-    this._recipes.update((recipes) =>
-      recipes.map((recipe) =>
-        recipe.id === recipeId
-          ? {
-              ...recipe,
-              ingredients: recipe.ingredients.filter((line) => line.ingredientId !== ingredientId),
-              updatedAt: new Date().toISOString(),
-            }
-          : recipe,
-      ),
-    );
+  removeRecipeIngredient(recipeId: string, ingredientId: string): Observable<RecipeDefinition> {
+    const current = this._recipes().find(r => r.id === recipeId);
+    if (!current) throw new Error('Recipe not found');
 
-    this.persist();
+    const lines = current.ingredientLines.filter(l => l.ingredientId !== ingredientId);
+    const payload = { ...current, ingredientLines: lines };
+    return this.http.post<RecipeDefinition>(this.apiUrl, payload).pipe(
+      tap((recipe) => {
+        recipe.flavorIds = current.flavorIds || [];
+        this._recipes.update((list) => list.map(r => r.id === recipe.id ? recipe : r));
+      })
+    );
   }
 
   getRecipeForFlavor(flavorId: string): RecipeDefinition | null {
@@ -345,7 +263,7 @@ export class RecipeMasterDataService {
 
     const ingredientMap = new Map(this._ingredients().map((ingredient) => [ingredient.id, ingredient]));
 
-    return recipe.ingredients
+    return (recipe.ingredientLines || [])
       .map((line) => {
         const ingredient = ingredientMap.get(line.ingredientId);
         if (!ingredient) {
@@ -367,10 +285,10 @@ export class RecipeMasterDataService {
       return 0;
     }
 
-    return recipe.ingredients.reduce((sum, line) => sum + Math.max(0, line.qty), 0);
+    return (recipe.ingredientLines || []).reduce((sum, line) => sum + Math.max(0, line.qty), 0);
   }
 
-  private normalizeMappings(persistAfter: boolean): void {
+  private normalizeMappings(): void {
     const flavorByRecipe = new Map<string, string[]>();
 
     this._flavors().forEach((flavor) => {
@@ -388,53 +306,5 @@ export class RecipeMasterDataService {
         flavorIds: flavorByRecipe.get(recipe.id) ?? [],
       })),
     );
-
-    if (persistAfter) {
-      this.persist();
-    }
-  }
-
-  private persist(): void {
-    this.normalizeMappings(false);
-
-    const payload: PersistedMasterData = {
-      ingredients: this._ingredients(),
-      recipes: this._recipes(),
-      flavors: this._flavors(),
-    };
-
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-
-    if (!this.syncingFromChannel) {
-      this.channel?.postMessage(payload);
-    }
-  }
-
-  private restore(): void {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return;
-    }
-
-    try {
-      const parsed = JSON.parse(raw) as PersistedMasterData;
-      this.applyState(parsed, true);
-    } catch {
-      localStorage.removeItem(STORAGE_KEY);
-    }
-  }
-
-  private applyState(state: PersistedMasterData, normalizeAfter: boolean): void {
-    if (!state || !Array.isArray(state.ingredients) || !Array.isArray(state.recipes) || !Array.isArray(state.flavors)) {
-      return;
-    }
-
-    this._ingredients.set(state.ingredients);
-    this._recipes.set(state.recipes);
-    this._flavors.set(state.flavors);
-
-    if (normalizeAfter) {
-      this.normalizeMappings(false);
-    }
   }
 }

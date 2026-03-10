@@ -21,6 +21,72 @@ const MODULE_SET = new Set(OPS_MODULES);
 const clients = [];
 const fallbackEvents = [];
 
+const fallbackIngredients = new Map(
+  [
+    { id: 'ing-gum-base-a', name: 'Gum Base A', unit: 'kg', active: true },
+    { id: 'ing-glucose-syrup', name: 'Glucose Syrup', unit: 'kg', active: true },
+    { id: 'ing-spearmint-oil', name: 'Spearmint Oil', unit: 'kg', active: true },
+    { id: 'ing-sugar-fine', name: 'Sugar (Fine)', unit: 'kg', active: true },
+    { id: 'ing-sweetener-x', name: 'Sweetener X', unit: 'kg', active: true },
+    { id: 'ing-coloring-blue', name: 'Coloring Blue', unit: 'L', active: true },
+    { id: 'ing-preservative', name: 'Preservative', unit: 'kg', active: true },
+  ].map((i) => [i.id, i])
+);
+
+const fallbackRecipes = new Map(
+  [
+    {
+      id: 'rcp-spearmint',
+      name: 'Spearmint Base Recipe',
+      code: 'RCP-MNT',
+      description: 'Primary mint profile used for standard production runs.',
+      active: true,
+      ingredientLines: [
+        { ingredientId: 'ing-gum-base-a', qty: 50 },
+        { ingredientId: 'ing-glucose-syrup', qty: 25.5 },
+        { ingredientId: 'ing-spearmint-oil', qty: 1.2 },
+        { ingredientId: 'ing-sugar-fine', qty: 23.3 },
+      ],
+    },
+    {
+      id: 'rcp-bubblegum',
+      name: 'Bubblegum Core Recipe',
+      code: 'RCP-BBG',
+      description: 'Sweet bubblegum profile tuned for high-volume output.',
+      active: true,
+      ingredientLines: [
+        { ingredientId: 'ing-gum-base-a', qty: 49.5 },
+        { ingredientId: 'ing-glucose-syrup', qty: 27 },
+        { ingredientId: 'ing-sweetener-x', qty: 2.5 },
+        { ingredientId: 'ing-sugar-fine', qty: 21 },
+      ],
+    },
+    {
+      id: 'rcp-fruit',
+      name: 'Fruit Fusion Recipe',
+      code: 'RCP-FRT',
+      description: 'Base profile for strawberry and watermelon flavors.',
+      active: true,
+      ingredientLines: [
+        { ingredientId: 'ing-gum-base-a', qty: 48 },
+        { ingredientId: 'ing-glucose-syrup', qty: 26 },
+        { ingredientId: 'ing-sweetener-x', qty: 3 },
+        { ingredientId: 'ing-coloring-blue', qty: 1 },
+        { ingredientId: 'ing-sugar-fine', qty: 22 },
+      ],
+    },
+  ].map((r) => [r.id, r])
+);
+
+const fallbackFlavors = new Map(
+  [
+    { id: 'flv-mnt', name: 'Spearmint Blast', code: 'MNT', active: true, recipeId: 'rcp-spearmint' },
+    { id: 'flv-bbg', name: 'Bubblegum Classic', code: 'BBG', active: true, recipeId: 'rcp-bubblegum' },
+    { id: 'flv-str', name: 'Strawberry Fusion', code: 'STR', active: true, recipeId: 'rcp-fruit' },
+    { id: 'flv-wtr', name: 'Watermelon Wave', code: 'WTR', active: true, recipeId: 'rcp-fruit' },
+  ].map((f) => [f.id, f])
+);
+
 const fallbackWorkers = new Map(
   [
     {
@@ -398,8 +464,214 @@ app.get('/api/v1/ops/supabase/config', (_req, res) => {
     publishableKey: SUPABASE_PUBLISHABLE_KEY,
     restApiUrl: SUPABASE_REST_BASE_URL,
     dbEnabled: SUPABASE_ENABLED,
-    usingFallbackStorage: !SUPABASE_ENABLED,
   });
+});
+
+// ═══════════════════════════════════════════════════
+// RECIPES MASTER DATA ENDPOINTS
+// ═══════════════════════════════════════════════════
+
+async function fetchIngredientsFromSupabase() {
+  const rows = await supabaseRequest('recipe_ingredients?select=id,name,unit,active&order=name.asc');
+  if (!Array.isArray(rows)) return [];
+  return rows.map((r) => ({
+    id: String(r.id),
+    name: String(r.name),
+    unit: String(r.unit),
+    active: Boolean(r.active),
+  }));
+}
+
+async function upsertIngredientToSupabase(ingredient) {
+  await supabaseRequest('recipe_ingredients?on_conflict=id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: {
+      id: ingredient.id,
+      name: ingredient.name,
+      unit: ingredient.unit,
+      active: ingredient.active,
+    },
+  });
+  return ingredient;
+}
+
+app.get('/api/v1/recipes/ingredients', async (_req, res) => {
+  try {
+    const items = SUPABASE_ENABLED ? await fetchIngredientsFromSupabase() : Array.from(fallbackIngredients.values());
+    res.json({ items });
+  } catch (error) {
+    console.error('Ingredients read failed.', error);
+    res.json({ items: Array.from(fallbackIngredients.values()) });
+  }
+});
+
+app.post('/api/v1/recipes/ingredients', async (req, res) => {
+  const item = {
+    id: safeText(req.body?.id, `ing-${uuidv4()}`),
+    name: safeText(req.body?.name, 'Unnamed Ingredient'),
+    unit: safeText(req.body?.unit, 'kg'),
+    active: req.body?.active !== false,
+  };
+  try {
+    if (SUPABASE_ENABLED) {
+      await upsertIngredientToSupabase(item);
+    } else {
+      fallbackIngredients.set(item.id, item);
+    }
+    res.status(201).json(item);
+  } catch (error) {
+    res.status(500).json({ error: 'ingredient_upsert_failed', message: error.message });
+  }
+});
+
+async function fetchRecipesFromSupabase() {
+  const recipes = await supabaseRequest('recipe_definitions?select=id,name,code,description,active&order=name.asc');
+  if (!Array.isArray(recipes)) return [];
+
+  const lines = await supabaseRequest('recipe_lines?select=recipe_id,ingredient_id,qty&limit=5000');
+  const linesByRecipe = new Map();
+  if (Array.isArray(lines)) {
+    lines.forEach((l) => {
+      const list = linesByRecipe.get(l.recipe_id) || [];
+      list.push({ ingredientId: String(l.ingredient_id), qty: Number(l.qty) });
+      linesByRecipe.set(l.recipe_id, list);
+    });
+  }
+
+  return recipes.map((r) => ({
+    id: String(r.id),
+    name: String(r.name),
+    code: String(r.code),
+    description: String(r.description),
+    active: Boolean(r.active),
+    ingredientLines: linesByRecipe.get(r.id) || [],
+  }));
+}
+
+async function upsertRecipeToSupabase(recipe) {
+  await supabaseRequest('recipe_definitions?on_conflict=id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: {
+      id: recipe.id,
+      name: recipe.name,
+      code: recipe.code,
+      description: recipe.description,
+      active: recipe.active,
+    },
+  });
+
+  await supabaseRequest(`recipe_lines?recipe_id=eq.${encodeURIComponent(recipe.id)}`, {
+    method: 'DELETE',
+    headers: { Prefer: 'return=minimal' },
+  });
+
+  if (recipe.ingredientLines && recipe.ingredientLines.length > 0) {
+    await supabaseRequest('recipe_lines?on_conflict=recipe_id%2Cingredient_id', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: recipe.ingredientLines.map((l) => ({
+        recipe_id: recipe.id,
+        ingredient_id: l.ingredientId,
+        qty: l.qty,
+      })),
+    });
+  }
+  return recipe;
+}
+
+app.get('/api/v1/recipes', async (_req, res) => {
+  try {
+    const items = SUPABASE_ENABLED ? await fetchRecipesFromSupabase() : Array.from(fallbackRecipes.values());
+    res.json({ items });
+  } catch (error) {
+    console.error('Recipes read failed.', error);
+    res.json({ items: Array.from(fallbackRecipes.values()) });
+  }
+});
+
+app.post('/api/v1/recipes', async (req, res) => {
+  const lines = Array.isArray(req.body?.ingredientLines) ? req.body.ingredientLines.map((l) => ({
+    ingredientId: safeText(l.ingredientId, ''),
+    qty: safeNumber(l.qty, 0),
+  })).filter((l) => l.ingredientId !== '' && l.qty >= 0) : [];
+
+  const item = {
+    id: safeText(req.body?.id, `rcp-${uuidv4()}`),
+    name: safeText(req.body?.name, 'Unnamed Recipe'),
+    code: safeText(req.body?.code, `RCP-${Math.floor(Math.random() * 9000) + 1000}`),
+    description: safeText(req.body?.description, ''),
+    active: req.body?.active !== false,
+    ingredientLines: lines,
+  };
+  try {
+    if (SUPABASE_ENABLED) {
+      await upsertRecipeToSupabase(item);
+    } else {
+      fallbackRecipes.set(item.id, item);
+    }
+    res.status(201).json(item);
+  } catch (error) {
+    res.status(500).json({ error: 'recipe_upsert_failed', message: error.message });
+  }
+});
+
+async function fetchFlavorsFromSupabase() {
+  const rows = await supabaseRequest('flavor_definitions?select=id,name,code,active,recipe_id&order=name.asc');
+  if (!Array.isArray(rows)) return [];
+  return rows.map((r) => ({
+    id: String(r.id),
+    name: String(r.name),
+    code: String(r.code),
+    active: Boolean(r.active),
+    recipeId: r.recipe_id ? String(r.recipe_id) : null,
+  }));
+}
+
+async function upsertFlavorToSupabase(flavor) {
+  await supabaseRequest('flavor_definitions?on_conflict=id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: {
+      id: flavor.id,
+      name: flavor.name,
+      code: flavor.code,
+      active: flavor.active,
+      recipe_id: flavor.recipeId || null,
+    },
+  });
+  return flavor;
+}
+
+app.get('/api/v1/recipes/flavors', async (_req, res) => {
+  try {
+    const items = SUPABASE_ENABLED ? await fetchFlavorsFromSupabase() : Array.from(fallbackFlavors.values());
+    res.json({ items });
+  } catch (error) {
+    console.error('Flavors read failed.', error);
+    res.json({ items: Array.from(fallbackFlavors.values()) });
+  }
+});
+
+app.post('/api/v1/recipes/flavors', async (req, res) => {
+  const item = {
+    id: safeText(req.body?.id, `flv-${uuidv4()}`),
+    name: safeText(req.body?.name, 'Unnamed Flavor'),
+    code: safeText(req.body?.code, `FLV-${Math.floor(Math.random() * 900) + 100}`),
+    active: req.body?.active !== false,
+    recipeId: req.body?.recipeId ? safeText(req.body.recipeId, '') : null,
+  };
+  try {
+    if (SUPABASE_ENABLED) {
+      await upsertFlavorToSupabase(item);
+    } else {
+      fallbackFlavors.set(item.id, item);
+    }
+    res.status(201).json(item);
+  } catch (error) {
+    res.status(500).json({ error: 'flavor_upsert_failed', message: error.message });
+  }
 });
 
 app.post('/api/v1/ops/events', async (req, res) => {
@@ -583,45 +855,107 @@ app.get('/api/v1/ops/events/stream', (_req, res) => {
   });
 });
 
-const MOCK_USER = {
-  userId: 'admin-1',
-  tenantId: 'tenant-1',
-  name: 'Admin User',
-  role: 'Platform_Admin',
-  factoryIds: ['factory-1'],
-  phone: '9999999999',
-};
+const SESSION_TOKEN_SECRET = 'temporary-unsigned-jwt-secret'; // Real implementation should use proper JWT signing
 
-const MOCK_TOKENS = {
-  accessToken: 'mock-access-token',
-  refreshToken: 'mock-refresh-token',
-  expiresIn: 3600,
-};
+app.post('/api/v1/auth/login/phone', async (req, res) => {
+  const phone = safeText(req.body?.phone, '');
+  const pin = safeText(req.body?.pin, '');
 
-app.post('/api/v1/auth/login/phone', (_req, res) => {
-  res.json({ ...MOCK_TOKENS, user: MOCK_USER });
+  if (!phone || !pin) {
+    return res.status(400).json({ error: 'invalid_request', message: 'Phone and PIN required.' });
+  }
+
+  try {
+    let worker = null;
+    let modules = [];
+
+    if (SUPABASE_ENABLED) {
+      // Find worker by phone and pin — uses real column names: worker_id, worker_role
+      const rows = await supabaseRequest(
+        `ops_workers?phone=eq.${encodeURIComponent(phone)}&pin=eq.${encodeURIComponent(pin)}&select=worker_id,name,phone,worker_role,active&limit=1`
+      );
+
+      if (!rows || rows.length === 0) {
+        return res.status(401).json({ error: 'unauthorized', message: 'Invalid phone or PIN.' });
+      }
+
+      worker = rows[0];
+      // Normalise field names so the rest of the handler uses `.id` and `.role`
+      worker.id = worker.worker_id;
+      worker.role = worker.worker_role;
+      worker.tenant_id = 'default-tenant';
+      worker.factory_ids = ['factory-1'];
+
+      if (!worker.active) {
+        return res.status(403).json({ error: 'forbidden', message: 'Account is inactive.' });
+      }
+
+      // Fetch module permissions
+      const accessRows = await supabaseRequest(
+        `ops_worker_module_access?worker_id=eq.${encodeURIComponent(worker.id)}&select=module`
+      );
+      modules = (accessRows || []).map(r => r.module);
+    } else {
+      // Fallback auth
+      const match = Array.from(fallbackWorkers.values()).find(w => w.phone === phone && w.pin === pin);
+      if (!match) {
+        return res.status(401).json({ error: 'unauthorized', message: 'Invalid phone or PIN.' });
+      }
+      if (!match.active) {
+        return res.status(403).json({ error: 'forbidden', message: 'Account is inactive.' });
+      }
+      worker = {
+        id: match.id,
+        name: match.name,
+        phone: match.phone,
+        role: match.role,
+        tenant_id: 'default-tenant',
+        factory_ids: ['factory-1'],
+      };
+      modules = match.allowedModules || [];
+    }
+
+    const userData = {
+      userId: worker.id,
+      tenantId: worker.tenant_id || 'default-tenant',
+      name: worker.name,
+      role: worker.role,
+      status: 'active',
+      factoryIds: worker.factory_ids || ['factory-1'],
+      phone: worker.phone,
+      permissions: modules.map(m => ({
+        module: m,
+        action: 'write',
+        resourceScope: 'factory'
+      })).concat([
+        // Base dashboard read access
+        { module: 'dashboard', action: 'read', resourceScope: 'tenant' }
+      ])
+    };
+
+    res.json({
+      accessToken: `token-${worker.id}-${Date.now()}`,
+      refreshToken: `refresh-${worker.id}-${Date.now()}`,
+      expiresIn: 3600,
+      user: userData
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'internal_error', message: 'Login failed.' });
+  }
 });
 
+// Since we are mocking tokens for now until full JWT implementation, we just return success
 app.post('/api/v1/auth/refresh', (_req, res) => {
-  res.json({ ...MOCK_TOKENS });
+  res.json({
+    accessToken: `token-refreshed-${Date.now()}`,
+    refreshToken: `refresh-${Date.now()}`,
+    expiresIn: 3600,
+  });
 });
 
 app.post('/api/v1/auth/logout', (_req, res) => {
   res.status(200).send();
-});
-
-app.get('/api/v1/auth/me', (_req, res) => {
-  res.json(MOCK_USER);
-});
-
-app.get('/api/v1/auth/permissions', (_req, res) => {
-  res.json([
-    { module: 'dashboard', action: 'read', resourceScope: 'tenant' },
-    { module: 'inwarding', action: 'create', resourceScope: 'factory' },
-    { module: 'production', action: 'create', resourceScope: 'factory' },
-    { module: 'packing', action: 'create', resourceScope: 'factory' },
-    { module: 'dispatch', action: 'create', resourceScope: 'factory' },
-  ]);
 });
 
 app.post('/api/v1/auth/sync/events', (req, res) => {

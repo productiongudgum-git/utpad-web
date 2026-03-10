@@ -27,36 +27,36 @@ import { TokenService } from '../../../core/auth/token.service';
           <h2 class="text-lg font-semibold text-text-main-light dark:text-text-main-dark mb-6">Sign in to your account</h2>
 
           <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" class="space-y-4">
-            <!-- Email -->
+            <!-- Phone -->
             <div>
-              <label class="block text-sm font-medium text-text-sub-light dark:text-text-sub-dark mb-1">Email</label>
-              <input formControlName="email" type="email" autocomplete="email"
+              <label class="block text-sm font-medium text-text-sub-light dark:text-text-sub-dark mb-1">Phone Number</label>
+              <input formControlName="phone" type="tel" autocomplete="tel"
                      class="block w-full rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-800 text-text-main-light dark:text-text-main-dark placeholder-text-sub-light dark:placeholder-text-sub-dark focus:ring-primary focus:border-primary text-sm py-2.5 px-3"
-                     placeholder="you&#64;company.com">
-              @if (loginForm.get('email')?.touched && loginForm.get('email')?.hasError('required')) {
-                <p class="text-red-500 text-xs mt-1">Email is required</p>
+                     placeholder="e.g. 9876543210">
+              @if (loginForm.get('phone')?.touched && loginForm.get('phone')?.hasError('required')) {
+                <p class="text-red-500 text-xs mt-1">Phone number is required</p>
               }
-              @if (loginForm.get('email')?.touched && loginForm.get('email')?.hasError('email')) {
-                <p class="text-red-500 text-xs mt-1">Enter a valid email</p>
+              @if (loginForm.get('phone')?.touched && loginForm.get('phone')?.hasError('pattern')) {
+                <p class="text-red-500 text-xs mt-1">Enter a valid 10-digit number</p>
               }
             </div>
 
-            <!-- Password -->
+            <!-- PIN -->
             <div>
-              <label class="block text-sm font-medium text-text-sub-light dark:text-text-sub-dark mb-1">Password</label>
+              <label class="block text-sm font-medium text-text-sub-light dark:text-text-sub-dark mb-1">PIN</label>
               <div class="relative">
-                <input formControlName="password"
+                <input formControlName="pin"
                        [type]="showPassword() ? 'text' : 'password'"
                        autocomplete="current-password"
                        class="block w-full rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-800 text-text-main-light dark:text-text-main-dark placeholder-text-sub-light dark:placeholder-text-sub-dark focus:ring-primary focus:border-primary text-sm py-2.5 px-3 pr-10"
-                       placeholder="Enter your password">
+                       placeholder="Enter your 6-digit PIN">
                 <button type="button" (click)="toggleShowPassword()"
                         class="absolute inset-y-0 right-0 flex items-center pr-3 text-text-sub-light dark:text-text-sub-dark">
                   <span class="material-icons-round text-lg">{{ showPassword() ? 'visibility_off' : 'visibility' }}</span>
                 </button>
               </div>
-              @if (loginForm.get('password')?.touched && loginForm.get('password')?.hasError('required')) {
-                <p class="text-red-500 text-xs mt-1">Password is required</p>
+              @if (loginForm.get('pin')?.touched && loginForm.get('pin')?.hasError('required')) {
+                <p class="text-red-500 text-xs mt-1">PIN is required</p>
               }
             </div>
 
@@ -99,8 +99,8 @@ export class LoginComponent {
   errorMessage = signal('');
 
   loginForm = this.fb.nonNullable.group({
-    email: ['', [Validators.required, Validators.email]],
-    password: ['', [Validators.required]],
+    phone: ['', [Validators.required, Validators.pattern('^[0-9]{10}$')]],
+    pin: ['', [Validators.required, Validators.minLength(4)]],
   });
 
   constructor() {
@@ -114,29 +114,17 @@ export class LoginComponent {
 
     this.errorMessage.set('');
     this.isLoading.set(true);
-    const { email, password } = this.loginForm.getRawValue();
+    const { phone, pin } = this.loginForm.getRawValue();
 
-    if (environment.useMockData) {
-      this.handleMockLogin(email, password);
-      return;
-    }
-
-    this.authService.loginWithEmail(email, password).subscribe({
+    this.authService.loginWithPhone(phone, pin).subscribe({
       next: (response) => {
         this.isLoading.set(false);
-        if (isLoginRequires2FA(response)) {
-          this.router.navigate(['/auth/2fa'], { state: { tempToken: response.tempToken } });
-        } else {
-          this.router.navigate(['/dashboard']);
-        }
+        this.router.navigate(['/dashboard']);
       },
       error: (err) => {
         this.isLoading.set(false);
-        if (err.status === 401) {
-          this.errorMessage.set('Invalid credentials. Please check your email and password.');
-        } else if (err.status === 423) {
-          const minutes = err.error?.lockoutMinutesRemaining ?? 15;
-          this.errorMessage.set(`Account locked. Try again in ${minutes} minutes.`);
+        if (err.status === 401 || err.status === 403) {
+          this.errorMessage.set('Invalid phone number or PIN.');
         } else if (err.status === 429) {
           this.errorMessage.set('Too many requests. Please wait and try again.');
         } else {
@@ -150,27 +138,4 @@ export class LoginComponent {
     this.showPassword.update((currentValue) => !currentValue);
   }
 
-  private handleMockLogin(email: string, password: string): void {
-    setTimeout(() => {
-      this.isLoading.set(false);
-      if (email && password.length >= 4) {
-        const mockUser = {
-          userId: 'mock-user-1',
-          tenantId: 'mock-tenant-1',
-          email,
-          name: email.split('@')[0],
-          role: 'Tenant_Admin' as const,
-          factoryIds: ['factory-1'],
-          subscriptionTier: 'growth' as const,
-        };
-        this.tokenService.setTokens(
-          'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJtb2NrLXVzZXItMSIsInRlbmFudElkIjoibW9jay10ZW5hbnQtMSIsInJvbGUiOiJUZW5hbnRfQWRtaW4iLCJleHAiOjk5OTk5OTk5OTl9.mock',
-          'mock-refresh-token'
-        );
-        this.router.navigate(['/dashboard']);
-      } else {
-        this.errorMessage.set('Invalid credentials. Please check your email and password.');
-      }
-    }, 800);
-  }
 }

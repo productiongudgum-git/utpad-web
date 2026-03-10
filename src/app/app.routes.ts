@@ -7,7 +7,6 @@ export const routes: Routes = [
     path: 'auth',
     children: [
       { path: 'login', loadComponent: () => import('./features/auth/login/login.component').then(m => m.LoginComponent) },
-      { path: '2fa', loadComponent: () => import('./features/auth/two-factor/two-factor.component').then(m => m.TwoFactorComponent) },
       { path: '', redirectTo: 'login', pathMatch: 'full' },
     ],
   },
