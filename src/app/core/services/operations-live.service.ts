@@ -120,6 +120,21 @@ interface EventsApiResponse {
   events: OperationEvent[];
 }
 
+interface WorkerCredentialApi {
+  id: string;
+  name: string;
+  phone: string;
+  pin: string;
+  role: string;
+  allowedModules: WorkerModule[];
+  active: boolean;
+  createdAt: string;
+}
+
+interface WorkersApiResponse {
+  workers: WorkerCredentialApi[];
+}
+
 const MODULES: WorkerModule[] = ['inwarding', 'production', 'packing', 'dispatch'];
 const STORAGE_KEY = 'utpad_ops_command_center_state_v2';
 const CHANNEL_KEY = 'utpad_ops_command_center_channel';
@@ -259,6 +274,7 @@ export class OperationsLiveService {
       this.syncingFromChannel = false;
     });
 
+    void this.bootstrapWorkersFromBackend();
     void this.bootstrapFromBackend();
     this.connectEventStream();
   }
@@ -280,6 +296,7 @@ export class OperationsLiveService {
 
     this._workers.update((workers) => [worker, ...workers]);
     this.persistState();
+    void this.createWorkerInBackend(worker);
     return worker;
   }
 
@@ -296,6 +313,7 @@ export class OperationsLiveService {
       ),
     );
     this.persistState();
+    void this.updateWorkerAccessInBackend(workerId, nextModules);
   }
 
   setWorkerActive(workerId: string, active: boolean): void {
@@ -303,6 +321,7 @@ export class OperationsLiveService {
       workers.map((worker) => (worker.id === workerId ? { ...worker, active } : worker)),
     );
     this.persistState();
+    void this.updateWorkerActiveInBackend(workerId, active);
   }
 
   async submitInwarding(input: InwardingSubmission): Promise<OperationEvent> {
@@ -389,11 +408,93 @@ export class OperationsLiveService {
     return this.publishToBackend(request);
   }
 
+  private async bootstrapWorkersFromBackend(): Promise<void> {
+    try {
+      const response = await fetch(`${this.opsApiUrl}/workers`);
+      if (!response.ok) {
+        return;
+      }
+
+      const body = (await response.json()) as WorkersApiResponse;
+      if (!body?.workers || !Array.isArray(body.workers) || body.workers.length === 0) {
+        return;
+      }
+
+      const normalizedWorkers = body.workers.map((worker) => ({
+        id: worker.id,
+        name: worker.name,
+        phone: worker.phone,
+        pin: worker.pin,
+        role: this.toUserRole(worker.role),
+        allowedModules: this.uniqueModules(worker.allowedModules ?? []),
+        active: worker.active !== false,
+        createdAt: worker.createdAt || new Date().toISOString(),
+      }));
+
+      this._workers.set(normalizedWorkers);
+      this.persistState();
+    } catch {
+      // Use local defaults if workers endpoint is unavailable.
+    }
+  }
+
+  private async createWorkerInBackend(worker: WorkerCredential): Promise<void> {
+    try {
+      await fetch(`${this.opsApiUrl}/workers`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Client-Platform': 'web',
+        },
+        body: JSON.stringify(worker),
+      });
+    } catch {
+      // Keep optimistic local state if backend write fails.
+    }
+  }
+
+  private async updateWorkerAccessInBackend(workerId: string, allowedModules: WorkerModule[]): Promise<void> {
+    if (allowedModules.length === 0) {
+      return;
+    }
+
+    try {
+      await fetch(`${this.opsApiUrl}/workers/${encodeURIComponent(workerId)}/access`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Client-Platform': 'web',
+        },
+        body: JSON.stringify({ allowedModules }),
+      });
+    } catch {
+      // Keep optimistic local state if backend write fails.
+    }
+  }
+
+  private async updateWorkerActiveInBackend(workerId: string, active: boolean): Promise<void> {
+    try {
+      await fetch(`${this.opsApiUrl}/workers/${encodeURIComponent(workerId)}/active`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Client-Platform': 'web',
+        },
+        body: JSON.stringify({ active }),
+      });
+    } catch {
+      // Keep optimistic local state if backend write fails.
+    }
+  }
+
   private async publishToBackend(request: SubmitOperationEventRequest): Promise<OperationEvent> {
     try {
       const response = await fetch(`${this.opsApiUrl}/events`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Client-Platform': 'web',
+        },
         body: JSON.stringify(request),
       });
 
@@ -597,6 +698,37 @@ export class OperationsLiveService {
     start.setHours(0, 0, 0, 0);
     const startMs = start.getTime();
     return this._events().filter((event) => new Date(event.createdAt).getTime() >= startMs).length;
+  }
+
+  private toUserRole(role: string): UserRole {
+    const values = Object.values(UserRole);
+    if (values.includes(role as UserRole)) {
+      return role as UserRole;
+    }
+
+    const normalized = role.trim().toLowerCase().replaceAll('-', '_').replaceAll(' ', '_');
+    switch (normalized) {
+      case 'inwarding':
+      case 'inwarding_staff':
+        return UserRole.InwardingStaff;
+      case 'production':
+      case 'production_operator':
+        return UserRole.ProductionOperator;
+      case 'packing':
+      case 'packing_staff':
+        return UserRole.PackingStaff;
+      case 'dispatch':
+      case 'dispatch_staff':
+        return UserRole.DispatchStaff;
+      case 'factory_supervisor':
+        return UserRole.FactorySupervisor;
+      case 'tenant_admin':
+        return UserRole.TenantAdmin;
+      case 'platform_admin':
+        return UserRole.PlatformAdmin;
+      default:
+        return UserRole.Viewer;
+    }
   }
 
   private defaultModulesForRole(role: UserRole): WorkerModule[] {

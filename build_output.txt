@@ -1,0 +1,32 @@
+[33mΓ¥»[39m Building...
+[32mΓ£ö[39m Building...
+Application bundle generation failed. [4.001 seconds]
+
+X [ERROR] NG5002: Opening tag "div" not terminated. [plugin angular-compiler]
+
+    src/app/features/dashboard/alerts/alerts.component.ts:100:14:
+      100 Γöé ...          <div class="w-9 h-9 rounded-lg flex items-center jus...
+          Γò╡              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+X [ERROR] NG5002: Unexpected closing tag "div". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags [plugin angular-compiler]
+
+    src/app/features/dashboard/alerts/alerts.component.ts:130:12:
+      130 Γöé             </div>
+          Γò╡             ~~~~~~
+
+
+X [ERROR] NG5002: Unexpected closing block. The block may have been closed earlier. If you meant to write the } character, you should use the "&#125;" HTML entity instead. [plugin angular-compiler]
+
+    src/app/features/dashboard/alerts/alerts.component.ts:131:10:
+      131 Γöé           }
+          Γò╡           ^
+
+
+X [ERROR] NG5002: Unexpected closing tag "div". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags [plugin angular-compiler]
+
+    src/app/features/dashboard/alerts/alerts.component.ts:133:6:
+      133 Γöé       </div>
+          Γò╡       ~~~~~~
+
+

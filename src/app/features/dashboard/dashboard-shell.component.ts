@@ -19,14 +19,8 @@ interface NavItem {
       <aside class="hidden md:flex md:flex-col md:w-64 bg-surface-light dark:bg-surface-dark border-r border-border-light dark:border-border-dark">
         <!-- Logo -->
         <div class="px-6 py-5 border-b border-border-light dark:border-border-dark">
-          <div class="flex items-center space-x-3">
-            <div class="w-9 h-9 bg-primary rounded-lg flex items-center justify-center">
-              <span class="material-icons-round text-white text-xl">precision_manufacturing</span>
-            </div>
-            <div>
-              <h1 class="text-lg font-bold text-text-main-light dark:text-text-main-dark tracking-tight">Utpad</h1>
-              <p class="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase tracking-widest">Manufacturing Ops</p>
-            </div>
+          <div class="flex items-center space-x-3 justify-center">
+            <img src="gudgum-logo.webp" alt="Gud Gum" class="h-10 w-auto object-contain dark:invert">
           </div>
         </div>
 
@@ -64,10 +58,7 @@ interface NavItem {
         <!-- Top Header (mobile + desktop) -->
         <header class="bg-surface-light dark:bg-surface-dark border-b border-border-light dark:border-border-dark px-4 py-3 flex items-center justify-between sticky top-0 z-10">
           <div class="flex items-center space-x-3 md:hidden">
-            <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-              <span class="material-icons-round text-white text-lg">precision_manufacturing</span>
-            </div>
-            <span class="text-lg font-bold text-text-main-light dark:text-text-main-dark">Utpad</span>
+            <img src="gudgum-logo.webp" alt="Gud Gum" class="h-8 w-auto object-contain dark:invert">
           </div>
           <div class="hidden md:block"></div>
           <div class="flex items-center space-x-3">
@@ -124,25 +115,19 @@ export class DashboardShellComponent {
   isDark = signal(false);
 
   navItems: NavItem[] = [
-    { label: 'Command Center', icon: 'dashboard', route: 'command-center' },
+    { label: 'Recipes', icon: 'science', route: 'recipes' },
     { label: 'Kanban Board', icon: 'view_kanban', route: 'kanban' },
     { label: 'Traceability', icon: 'account_tree', route: 'traceability' },
     { label: 'Alerts', icon: 'notifications_active', route: 'alerts' },
-    { label: 'Recipes', icon: 'science', route: 'recipes' },
-    { label: 'Inwarding', icon: 'inventory', route: 'inwarding' },
-    { label: 'Production', icon: 'precision_manufacturing', route: 'production' },
-    { label: 'Packing', icon: 'inventory_2', route: 'packing' },
-    { label: 'Dispatch', icon: 'local_shipping', route: 'dispatch' },
     { label: 'Users', icon: 'group', route: 'users' },
     { label: 'Sessions', icon: 'manage_accounts', route: 'sessions' },
   ];
 
   mobileNavItems: NavItem[] = [
-    { label: 'Center', icon: 'dashboard', route: 'command-center' },
+    { label: 'Recipes', icon: 'science', route: 'recipes' },
     { label: 'Kanban', icon: 'view_kanban', route: 'kanban' },
     { label: 'Trace', icon: 'account_tree', route: 'traceability' },
     { label: 'Alerts', icon: 'notifications_active', route: 'alerts' },
-    { label: 'Inward', icon: 'inventory', route: 'inwarding' },
     { label: 'Users', icon: 'group', route: 'users' },
   ];
 

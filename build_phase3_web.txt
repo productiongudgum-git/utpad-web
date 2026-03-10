@@ -1,0 +1,35 @@
+[33mΓ¥»[39m Building...
+[32mΓ£ö[39m Building...
+[1mInitial chunk files[22m  [2m | [22m[1mNames[22m                    [2m | [22m [1mRaw size[22m[2m | [22m[1mEstimated transfer size[22m
+[32mchunk-PRESWOPU.js[39m    [2m | [22m[2m-[22m                        [2m | [22m[36m163.35 kB[39m[2m | [22m               [36m47.79 kB[39m
+[32mchunk-WNYHAHPI.js[39m    [2m | [22m[2m-[22m                        [2m | [22m[36m100.57 kB[39m[2m | [22m               [36m25.33 kB[39m
+[32mpolyfills-FFHMD2TL.js[39m[2m | [22m[2mpolyfills[22m                [2m | [22m [36m34.52 kB[39m[2m | [22m               [36m11.28 kB[39m
+[32mchunk-3SHJSPB5.js[39m    [2m | [22m[2m-[22m                        [2m | [22m  [36m5.18 kB[39m[2m | [22m                [36m1.48 kB[39m
+[32mmain-4VHUBHPO.js[39m     [2m | [22m[2mmain[22m                     [2m | [22m  [36m2.80 kB[39m[2m | [22m                [36m1.04 kB[39m
+[32mchunk-TGPNAKMN.js[39m    [2m | [22m[2m-[22m                        [2m | [22m[36m283 bytes[39m[2m | [22m              [36m283 bytes[39m
+[32mstyles-NI4ROK5K.css[39m  [2m | [22m[2mstyles[22m                   [2m | [22m [36m59 bytes[39m[2m | [22m               [36m59 bytes[39m
+
+[1m [22m                    [2m | [22m[1mInitial total[22m            [2m | [22m[1m306.77 kB[22m[2m | [22m               [1m87.27 kB[22m
+
+[1mLazy chunk files[22m     [2m | [22m[1mNames[22m                    [2m | [22m [1mRaw size[22m[2m | [22m[1mEstimated transfer size[22m
+[32mchunk-UELXSUPX.js[39m    [2m | [22m[2m-[22m                        [2m | [22m [36m43.84 kB[39m[2m | [22m                [36m8.78 kB[39m
+[32mchunk-BIANBDTL.js[39m    [2m | [22m[2mrecipes-admin-component[22m  [2m | [22m [36m16.36 kB[39m[2m | [22m                [36m3.43 kB[39m
+[32mchunk-UZZA3P4F.js[39m    [2m | [22m[2minwarding-component[22m      [2m | [22m [36m11.05 kB[39m[2m | [22m                [36m2.84 kB[39m
+[32mchunk-ZZSHCBWH.js[39m    [2m | [22m[2mproduction-component[22m     [2m | [22m [36m10.10 kB[39m[2m | [22m                [36m2.93 kB[39m
+[32mchunk-OV5VY44A.js[39m    [2m | [22m[2m-[22m                        [2m | [22m [36m10.04 kB[39m[2m | [22m                [36m3.02 kB[39m
+[32mchunk-SYITTRG6.js[39m    [2m | [22m[2malerts-component[22m         [2m | [22m  [36m9.59 kB[39m[2m | [22m                [36m2.74 kB[39m
+[32mchunk-FYTOCHZB.js[39m    [2m | [22m[2mtraceability-component[22m   [2m | [22m  [36m8.74 kB[39m[2m | [22m                [36m2.73 kB[39m
+[32mchunk-BOWJC2WY.js[39m    [2m | [22m[2mtwo-factor-component[22m     [2m | [22m  [36m8.63 kB[39m[2m | [22m                [36m2.86 kB[39m
+[32mchunk-CWFJVXC7.js[39m    [2m | [22m[2mpacking-component[22m        [2m | [22m  [36m8.52 kB[39m[2m | [22m                [36m2.45 kB[39m
+[32mchunk-667FWSDR.js[39m    [2m | [22m[2mcommand-center-component[22m [2m | [22m  [36m8.48 kB[39m[2m | [22m                [36m2.35 kB[39m
+[32mchunk-MLRUVL2B.js[39m    [2m | [22m[2musers-component[22m          [2m | [22m  [36m8.17 kB[39m[2m | [22m                [36m2.47 kB[39m
+[32mchunk-VHWYQ42C.js[39m    [2m | [22m[2mdispatch-component[22m       [2m | [22m  [36m8.06 kB[39m[2m | [22m                [36m2.28 kB[39m
+[32mchunk-AYQYYOM3.js[39m    [2m | [22m[2mdashboard-shell-component[22m[2m | [22m  [36m7.32 kB[39m[2m | [22m                [36m2.03 kB[39m
+[32mchunk-GASHQMR7.js[39m    [2m | [22m[2mlogin-component[22m          [2m | [22m  [36m7.04 kB[39m[2m | [22m                [36m2.46 kB[39m
+[32mchunk-SBHWGJ5Z.js[39m    [2m | [22m[2m-[22m                        [2m | [22m  [36m6.84 kB[39m[2m | [22m                [36m1.77 kB[39m
+[2m...and 3 more lazy chunks files. Use "--verbose" to show all the files.[22m
+
+Application bundle generation complete. [4.448 seconds]
+
+Output location: C:\Users\devad\Downloads\Good_Flow\utpad-web\dist\utpad-web
+

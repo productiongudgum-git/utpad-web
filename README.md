@@ -22,10 +22,27 @@ Command-center live updates now subscribe to backend SSE and API:
 - `GET /api/v1/ops/events/stream`
 - `GET /api/v1/ops/events`
 - `POST /api/v1/ops/events`
+- `GET /api/v1/ops/workers`
+- `POST /api/v1/ops/workers`
+- `PATCH /api/v1/ops/workers/:workerId/access`
+- `PATCH /api/v1/ops/workers/:workerId/active`
 
 Configured via `environment.apiBaseUrl` in:
 - `src/environments/environment.ts`
 - `src/environments/environment.prod.ts`
+
+Supabase-backed shared DB details (ERD + RLS + migration SQL):
+- `../supabase/README.md`
+
+## Supabase Runtime Env
+
+Server-side API (`api/index.js`) reads:
+- `SUPABASE_URL`
+- `SUPABASE_PROJECT_REF`
+- `SUPABASE_PUBLISHABLE_KEY`
+- `SUPABASE_SECRET_KEY`
+
+Use `.env.example` as template for local setup.
 
 ## Build
 

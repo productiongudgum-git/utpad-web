@@ -1,235 +1,309 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { FormBuilder, ReactiveFormsModule, Validators, FormsModule } from '@angular/forms';
 import {
   IngredientDefinition,
   IngredientUnit,
   RecipeMasterDataService,
 } from '../../../core/services/recipe-master-data.service';
 
+interface BomLine {
+  id: string;
+  ingredientId: string;
+  lotBatchCode: string;
+  qty: number;
+}
+
 @Component({
   selector: 'app-recipes-admin',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule],
+  imports: [CommonModule, ReactiveFormsModule, FormsModule],
   template: `
-    <section class="p-4 md:p-6 space-y-6">
-      <header class="bg-surface-light dark:bg-surface-dark rounded-2xl border border-border-light dark:border-border-dark p-5 md:p-6">
-        <h1 class="text-2xl md:text-3xl font-bold text-text-main-light dark:text-text-main-dark">Recipes & Formula Mapping</h1>
-        <p class="mt-1 text-sm text-text-sub-light dark:text-text-sub-dark">
-          Create and configure ingredients, create recipes, and map each flavor profile to the correct recipe.
-        </p>
-      </header>
-
-      @if (statusMessage()) {
-        <div class="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-300">
-          {{ statusMessage() }}
-        </div>
-      }
-
-      <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <article class="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-light dark:border-border-dark p-4 md:p-5 space-y-4">
-          <h2 class="text-lg font-semibold text-text-main-light dark:text-text-main-dark">Ingredient Master</h2>
-
-          <form [formGroup]="ingredientCreateForm" (ngSubmit)="createIngredient()" class="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <input
-              formControlName="name"
-              type="text"
-              placeholder="Ingredient name"
-              class="md:col-span-2 rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-800 text-sm text-text-main-light dark:text-text-main-dark">
-            <select
-              formControlName="unit"
-              class="rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-800 text-sm text-text-main-light dark:text-text-main-dark">
-              @for (unit of units; track unit) {
-                <option [value]="unit">{{ unit }}</option>
-              }
-            </select>
-            <button
-              type="submit"
-              class="md:col-span-3 rounded-lg bg-primary text-white py-2.5 font-semibold hover:bg-primary-hover transition-colors disabled:opacity-50"
-              [disabled]="ingredientCreateForm.invalid">
-              Add Ingredient
-            </button>
-          </form>
-
-          <div class="border-t border-border-light dark:border-border-dark pt-4 space-y-3">
-            <label class="text-xs uppercase tracking-wider text-text-sub-light dark:text-text-sub-dark">Configure Ingredient</label>
-            <select
-              [value]="selectedIngredientId()"
-              (change)="onIngredientSelection($event)"
-              class="w-full rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-800 text-sm text-text-main-light dark:text-text-main-dark">
-              <option value="">Select ingredient...</option>
-              @for (ingredient of ingredients(); track ingredient.id) {
-                <option [value]="ingredient.id">{{ ingredient.name }} ({{ ingredient.unit }})</option>
-              }
-            </select>
-
-            <form [formGroup]="ingredientConfigForm" (ngSubmit)="saveIngredientConfig()" class="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <input formControlName="name" type="text" placeholder="Ingredient name"
-                     class="md:col-span-2 rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-800 text-sm text-text-main-light dark:text-text-main-dark">
-              <select formControlName="unit" class="rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-800 text-sm text-text-main-light dark:text-text-main-dark">
-                @for (unit of units; track unit) {
-                  <option [value]="unit">{{ unit }}</option>
-                }
-              </select>
-              <label class="md:col-span-2 inline-flex items-center gap-2 text-sm text-text-main-light dark:text-text-main-dark">
-                <input type="checkbox" formControlName="active">
-                Active in worker app
-              </label>
-              <button
-                type="submit"
-                class="rounded-lg border border-border-light dark:border-border-dark py-2.5 text-sm font-semibold text-text-main-light dark:text-text-main-dark hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
-                [disabled]="!selectedIngredientId() || ingredientConfigForm.invalid">
-                Save Ingredient
-              </button>
-            </form>
-          </div>
-        </article>
-
-        <article class="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-light dark:border-border-dark p-4 md:p-5 space-y-4">
-          <h2 class="text-lg font-semibold text-text-main-light dark:text-text-main-dark">Flavor Master</h2>
-
-          <form [formGroup]="flavorCreateForm" (ngSubmit)="createFlavor()" class="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <input formControlName="name" type="text" placeholder="Flavor name"
-                   class="md:col-span-2 rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-800 text-sm text-text-main-light dark:text-text-main-dark">
-            <input formControlName="code" type="text" placeholder="Code"
-                   class="rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-800 text-sm text-text-main-light dark:text-text-main-dark uppercase">
-            <button type="submit"
-                    class="md:col-span-3 rounded-lg bg-primary text-white py-2.5 font-semibold hover:bg-primary-hover transition-colors disabled:opacity-50"
-                    [disabled]="flavorCreateForm.invalid">
-              Add Flavor
-            </button>
-          </form>
-
-          <div class="border-t border-border-light dark:border-border-dark pt-4 space-y-3">
-            <p class="text-xs uppercase tracking-wider text-text-sub-light dark:text-text-sub-dark">Map Flavor ? Recipe</p>
-            <div class="space-y-2 max-h-[320px] overflow-y-auto pr-1">
-              @for (flavor of flavors(); track flavor.id) {
-                <div class="grid grid-cols-12 gap-2 items-center rounded-lg border border-border-light dark:border-border-dark p-2.5">
-                  <div class="col-span-5">
-                    <p class="text-sm font-medium text-text-main-light dark:text-text-main-dark">{{ flavor.name }}</p>
-                    <p class="text-xs text-text-sub-light dark:text-text-sub-dark">{{ flavor.code }}</p>
-                  </div>
-                  <select
-                    class="col-span-6 rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-800 text-sm text-text-main-light dark:text-text-main-dark"
-                    [value]="flavor.recipeId ?? ''"
-                    (change)="mapFlavorToRecipe(flavor.id, $event)">
-                    <option value="">Unmapped</option>
-                    @for (recipe of recipes(); track recipe.id) {
-                      <option [value]="recipe.id">{{ recipe.name }}</option>
-                    }
-                  </select>
-                  <label class="col-span-1 inline-flex justify-center">
-                    <input type="checkbox" [checked]="flavor.active" (change)="toggleFlavor(flavor.id, $event)">
-                  </label>
-                </div>
-              }
+    <section class="min-h-full" style="background: #faf8f5;">
+      <!-- Page Header -->
+      <div class="px-4 md:px-8 pt-6 pb-2 max-w-4xl mx-auto">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-1">
+          <div>
+            <div class="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
+              <span>Dashboard</span>
+              <span class="material-icons-round text-xs">chevron_right</span>
+              <span class="text-orange-500">Recipe Definition</span>
             </div>
+            <h1 class="text-2xl md:text-3xl font-bold text-[#1e293b] tracking-tight">Recipe Definition</h1>
+            <p class="text-sm text-gray-500 mt-1">Configure flavors and ingredient bill of materials for manufacturing batches.</p>
           </div>
-        </article>
+          <div class="flex items-center gap-3">
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
+              <span class="w-2 h-2 bg-green-500 rounded-full mr-1.5"></span>
+              Online
+            </span>
+          </div>
+        </div>
       </div>
 
-      <article class="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-light dark:border-border-dark p-4 md:p-5 space-y-4">
-        <h2 class="text-lg font-semibold text-text-main-light dark:text-text-main-dark">Recipe Builder</h2>
+      <div class="px-4 md:px-8 pb-8 space-y-6 max-w-4xl mx-auto">
 
-        <form [formGroup]="recipeCreateForm" (ngSubmit)="createRecipe()" class="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <input formControlName="name" type="text" placeholder="Recipe name"
-                 class="md:col-span-2 rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-800 text-sm text-text-main-light dark:text-text-main-dark">
-          <input formControlName="code" type="text" placeholder="Recipe code"
-                 class="rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-800 text-sm text-text-main-light dark:text-text-main-dark uppercase">
-          <input formControlName="description" type="text" placeholder="Description"
-                 class="rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-800 text-sm text-text-main-light dark:text-text-main-dark">
-          <button type="submit"
-                  class="md:col-span-4 rounded-lg bg-primary text-white py-2.5 font-semibold hover:bg-primary-hover transition-colors disabled:opacity-50"
-                  [disabled]="recipeCreateForm.invalid">
-            Create Recipe
-          </button>
-        </form>
+        <!-- Status Message -->
+        @if (statusMessage()) {
+          <div class="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+            {{ statusMessage() }}
+          </div>
+        }
 
-        <div class="border-t border-border-light dark:border-border-dark pt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
-          <div class="space-y-3">
-            <label class="text-xs uppercase tracking-wider text-text-sub-light dark:text-text-sub-dark">Configure Recipe</label>
-            <select [value]="selectedRecipeId()" (change)="onRecipeSelection($event)"
-                    class="w-full rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-800 text-sm text-text-main-light dark:text-text-main-dark">
-              <option value="">Select recipe...</option>
-              @for (recipe of recipes(); track recipe.id) {
-                <option [value]="recipe.id">{{ recipe.name }} ({{ recipe.code }})</option>
-              }
-            </select>
-
-            <form [formGroup]="recipeConfigForm" (ngSubmit)="saveRecipeConfig()" class="grid grid-cols-1 gap-3">
-              <input formControlName="name" type="text" placeholder="Recipe name"
-                     class="rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-800 text-sm text-text-main-light dark:text-text-main-dark">
-              <input formControlName="code" type="text" placeholder="Recipe code"
-                     class="rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-800 text-sm text-text-main-light dark:text-text-main-dark uppercase">
-              <input formControlName="description" type="text" placeholder="Description"
-                     class="rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-800 text-sm text-text-main-light dark:text-text-main-dark">
-              <label class="inline-flex items-center gap-2 text-sm text-text-main-light dark:text-text-main-dark">
-                <input type="checkbox" formControlName="active">
-                Active recipe
-              </label>
-              <button type="submit"
-                      class="rounded-lg border border-border-light dark:border-border-dark py-2.5 text-sm font-semibold text-text-main-light dark:text-text-main-dark hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
-                      [disabled]="!selectedRecipeId() || recipeConfigForm.invalid">
-                Save Recipe Config
-              </button>
-            </form>
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 1: FLAVOR SETUP                            -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+          <div class="px-6 pt-6 pb-2 flex items-center gap-3">
+            <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm" style="background: linear-gradient(135deg, #f97316, #ea580c);">
+              <span class="material-icons-round text-lg">fingerprint</span>
+            </div>
+            <h2 class="text-xl font-bold text-[#1e293b]">Section 1: Flavor Setup</h2>
           </div>
 
-          <div class="space-y-3">
-            <div class="flex items-center justify-between">
-              <label class="text-xs uppercase tracking-wider text-text-sub-light dark:text-text-sub-dark">Recipe Ingredients</label>
-              <span class="text-xs px-2 py-1 rounded bg-primary/10 text-primary font-semibold">Yield: {{ selectedRecipeYield().toFixed(1) }} kg</span>
+          <div class="px-6 pb-6 pt-4 space-y-5">
+            <!-- Toggle: Create New / Select Existing -->
+            <div class="flex rounded-lg border border-gray-200 overflow-hidden w-fit">
+              <button
+                type="button"
+                (click)="flavorMode.set('create')"
+                class="px-5 py-2.5 text-sm font-semibold transition-colors"
+                [class]="flavorMode() === 'create' ? 'bg-orange-50 text-orange-600 border-r border-gray-200' : 'bg-white text-gray-500 border-r border-gray-200 hover:bg-gray-50'">
+                Create New
+              </button>
+              <button
+                type="button"
+                (click)="flavorMode.set('select')"
+                class="px-5 py-2.5 text-sm font-semibold transition-colors"
+                [class]="flavorMode() === 'select' ? 'bg-orange-50 text-orange-600' : 'bg-white text-gray-500 hover:bg-gray-50'">
+                Select Existing
+              </button>
             </div>
 
-            <form [formGroup]="recipeLineForm" (ngSubmit)="upsertRecipeLine()" class="grid grid-cols-1 md:grid-cols-3 gap-2">
-              <select formControlName="ingredientId"
-                      class="md:col-span-2 rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-800 text-sm text-text-main-light dark:text-text-main-dark">
-                <option value="">Select ingredient...</option>
-                @for (ingredient of ingredients(); track ingredient.id) {
-                  <option [value]="ingredient.id">{{ ingredient.name }} ({{ ingredient.unit }})</option>
-                }
-              </select>
-              <input formControlName="qty" type="number" min="0" step="0.1" placeholder="Qty"
-                     class="rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-800 text-sm text-text-main-light dark:text-text-main-dark">
-              <button type="submit"
-                      class="md:col-span-3 rounded-lg bg-primary text-white py-2.5 text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-50"
-                      [disabled]="!selectedRecipeId() || recipeLineForm.invalid">
-                Add / Update Ingredient Line
-              </button>
-            </form>
-
-            <div class="rounded-xl border border-border-light dark:border-border-dark overflow-hidden">
-              <div class="divide-y divide-border-light dark:divide-border-dark max-h-[240px] overflow-y-auto">
-                @if (selectedRecipeLines().length === 0) {
-                  <div class="px-4 py-6 text-sm text-text-sub-light dark:text-text-sub-dark text-center">
-                    No ingredients mapped yet.
+            @if (flavorMode() === 'select') {
+              <!-- Select Existing Flavor -->
+              <div>
+                <label class="block text-sm font-semibold text-[#1e293b] mb-2">Select Existing Flavor</label>
+                <div class="relative">
+                  <select
+                    [formControl]="selectedFlavorControl"
+                    (change)="onExistingFlavorSelected()"
+                    class="block w-full rounded-lg border border-gray-200 bg-gray-50 text-sm text-[#1e293b] py-3 pl-10 pr-10 appearance-none focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition">
+                    <option value="">Search existing flavors (e.g. Spearmint, Lemon Ice)...</option>
+                    @for (flavor of flavors(); track flavor.id) {
+                      <option [value]="flavor.id">{{ flavor.name }} ({{ flavor.code }})</option>
+                    }
+                  </select>
+                  <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
+                    <span class="material-icons-round text-lg">search</span>
                   </div>
-                }
-
-                @for (line of selectedRecipeLines(); track line.ingredientId) {
-                  <div class="px-4 py-2.5 flex items-center justify-between gap-3">
-                    <div>
-                      <p class="text-sm font-medium text-text-main-light dark:text-text-main-dark">{{ line.name }}</p>
-                      <p class="text-xs text-text-sub-light dark:text-text-sub-dark">{{ line.qty }} {{ line.unit }}</p>
-                    </div>
-                    <button
-                      type="button"
-                      (click)="removeRecipeLine(line.ingredientId)"
-                      class="px-2.5 py-1.5 rounded border border-red-200 text-red-600 text-xs font-semibold hover:bg-red-50 dark:border-red-900/30 dark:hover:bg-red-900/20">
-                      Remove
-                    </button>
+                  <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400">
+                    <span class="material-icons-round text-lg">expand_more</span>
                   </div>
-                }
+                </div>
+              </div>
+
+              <!-- OR CREATE NEW divider -->
+              <div class="flex items-center gap-4">
+                <div class="flex-1 h-px bg-gray-200"></div>
+                <span class="text-xs font-semibold uppercase tracking-widest text-orange-500">Or Create New</span>
+                <div class="flex-1 h-px bg-gray-200"></div>
+              </div>
+
+              <!-- New Flavor fields (below divider in select mode) -->
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-sm font-semibold text-[#1e293b] mb-2">New Flavor Name</label>
+                  <input type="text" [formControl]="flavorNameControl" placeholder="e.g. Peppermint Breeze"
+                    class="block w-full rounded-lg border border-gray-200 bg-gray-50 text-sm text-[#1e293b] py-3 px-4 focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition placeholder:text-gray-400">
+                </div>
+                <div>
+                  <label class="block text-sm font-semibold text-[#1e293b] mb-2">Flavor Code</label>
+                  <input type="text" [formControl]="flavorCodeControl" placeholder="FLV-XXX"
+                    class="block w-full rounded-lg border border-gray-200 bg-gray-50 text-sm text-[#1e293b] py-3 px-4 uppercase focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition placeholder:text-gray-400">
+                </div>
+              </div>
+            }
+
+            @if (flavorMode() === 'create') {
+              <!-- Create New Flavor -->
+              <div>
+                <label class="block text-sm font-semibold text-[#1e293b] mb-2">Flavor Name</label>
+                <input type="text" [formControl]="flavorNameControl" placeholder="e.g. Spearmint Fresh"
+                  class="block w-full rounded-lg border border-gray-200 bg-gray-50 text-sm text-[#1e293b] py-3 px-4 focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition placeholder:text-gray-400">
+              </div>
+              <div>
+                <label class="block text-sm font-semibold text-[#1e293b] mb-2">Flavor Code</label>
+                <input type="text" [formControl]="flavorCodeControl" placeholder="e.g. FLV-001"
+                  class="block w-full rounded-lg border border-gray-200 bg-gray-50 text-sm text-[#1e293b] py-3 px-4 uppercase focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition placeholder:text-gray-400">
+              </div>
+
+              <!-- Seasonal variant checkbox -->
+              <label class="inline-flex items-center gap-2.5 bg-orange-50 border border-orange-200 rounded-lg px-4 py-3 cursor-pointer hover:bg-orange-100 transition">
+                <input type="checkbox" [(ngModel)]="isSeasonalVariant"
+                  class="w-4 h-4 rounded border-gray-300 text-orange-500 focus:ring-orange-400">
+                <span class="text-sm text-[#1e293b] font-medium">Define as unique seasonal variant</span>
+              </label>
+            }
+          </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 2: RECIPE IDENTITY                         -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+          <div class="px-6 pt-6 pb-2 flex items-center gap-3">
+            <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm" style="background: linear-gradient(135deg, #f97316, #ea580c);">
+              <span class="material-icons-round text-lg">wifi_tethering</span>
+            </div>
+            <h2 class="text-xl font-bold text-[#1e293b]">Section 2: Recipe Identity</h2>
+          </div>
+
+          <div class="px-6 pb-6 pt-4 space-y-5">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-semibold text-[#1e293b] mb-2">Recipe Name</label>
+                <input type="text" [formControl]="recipeNameControl" placeholder="e.g. Peppermint Sugar Free V2"
+                  class="block w-full rounded-lg border border-gray-200 bg-gray-50 text-sm text-[#1e293b] py-3 px-4 focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition placeholder:text-gray-400">
+              </div>
+              <div>
+                <label class="block text-sm font-semibold text-[#1e293b] mb-2">Recipe Code (Auto-generated)</label>
+                <div class="relative">
+                  <input type="text" [formControl]="recipeCodeControl" placeholder="GG-REC-2024-08"
+                    class="block w-full rounded-lg border border-gray-200 bg-gray-50 text-sm text-[#1e293b] py-3 px-4 pr-12 uppercase focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition placeholder:text-gray-400">
+                  <button type="button" (click)="regenerateCode()"
+                    class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-orange-500 transition">
+                    <span class="material-icons-round text-lg">refresh</span>
+                  </button>
+                </div>
               </div>
             </div>
-
-            <div class="text-xs text-text-sub-light dark:text-text-sub-dark">
-              Mapped flavors:
-              <span class="font-semibold text-text-main-light dark:text-text-main-dark">{{ selectedRecipeFlavorNames() || 'None' }}</span>
+            <div>
+              <label class="block text-sm font-semibold text-[#1e293b] mb-2">Manufacturing Notes & Description</label>
+              <textarea [formControl]="recipeDescriptionControl" rows="3"
+                placeholder="Specify special temperature requirements or mixing sequences..."
+                class="block w-full rounded-lg border border-gray-200 bg-gray-50 text-sm text-[#1e293b] py-3 px-4 resize-y focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition placeholder:text-gray-400"></textarea>
             </div>
           </div>
         </div>
-      </article>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 3: INGREDIENT BOM                          -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+          <div class="px-6 pt-6 pb-2 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm" style="background: linear-gradient(135deg, #f97316, #ea580c);">
+                <span class="material-icons-round text-lg">list_alt</span>
+              </div>
+              <h2 class="text-xl font-bold text-[#1e293b]">Section 3: Ingredient BOM</h2>
+            </div>
+            <button type="button" (click)="addBomLine()"
+              class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-orange-50 text-orange-600 font-semibold text-sm border border-orange-200 hover:bg-orange-100 transition">
+              <span class="material-icons-round text-lg">add_circle</span>
+              Add Ingredient
+            </button>
+          </div>
+
+          <div class="px-6 pb-6 pt-4 space-y-3">
+            <!-- Column headers -->
+            @if (bomLines().length > 0) {
+              <div class="grid grid-cols-12 gap-3 text-xs font-semibold uppercase tracking-wider text-gray-400 px-1">
+                <div class="col-span-5">Ingredient Selector</div>
+                <div class="col-span-3">Lot/Batch Code</div>
+                <div class="col-span-3">Quantity</div>
+                <div class="col-span-1"></div>
+              </div>
+            }
+
+            <!-- BOM Rows -->
+            @for (line of bomLines(); track line.id; let i = $index) {
+              <div class="grid grid-cols-12 gap-3 items-center bg-gray-50 rounded-xl border border-gray-100 p-3">
+                <!-- Ingredient dropdown -->
+                <div class="col-span-5">
+                  <div class="relative">
+                    <select
+                      [value]="line.ingredientId"
+                      (change)="onBomIngredientChange(line.id, $event)"
+                      class="block w-full rounded-lg border border-gray-200 bg-white text-sm text-[#1e293b] py-2.5 pl-3 pr-8 appearance-none focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition">
+                      <option value="">Select...</option>
+                      @for (ing of ingredients(); track ing.id) {
+                        <option [value]="ing.id">{{ ing.name }}</option>
+                      }
+                    </select>
+                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-gray-400">
+                      <span class="material-icons-round text-sm">expand_more</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Lot/Batch Code -->
+                <div class="col-span-3">
+                  <input type="text"
+                    [value]="line.lotBatchCode"
+                    (input)="onBomLotChange(line.id, $event)"
+                    placeholder="BATCH-XXX"
+                    class="block w-full rounded-lg border border-gray-200 bg-white text-sm text-[#1e293b] py-2.5 px-3 focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition placeholder:text-gray-400 uppercase">
+                </div>
+
+                <!-- Quantity -->
+                <div class="col-span-3">
+                  <div class="relative">
+                    <input type="number"
+                      [value]="line.qty"
+                      (input)="onBomQtyChange(line.id, $event)"
+                      placeholder="0.00"
+                      min="0" step="0.01"
+                      class="block w-full rounded-lg border border-gray-200 bg-white text-sm text-[#1e293b] py-2.5 px-3 pr-10 focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition">
+                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                      <span class="text-xs font-semibold text-orange-500">KG</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Delete -->
+                <div class="col-span-1 flex justify-center">
+                  <button type="button" (click)="removeBomLine(line.id)"
+                    class="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition">
+                    <span class="material-icons-round text-lg">delete_outline</span>
+                  </button>
+                </div>
+              </div>
+            }
+
+            @if (bomLines().length === 0) {
+              <div class="text-center py-8 text-sm text-gray-400">
+                No ingredients added yet. Click "Add Ingredient" to start building your BOM.
+              </div>
+            }
+
+            <!-- Yield summary -->
+            @if (bomLines().length > 0) {
+              <div class="flex items-center justify-between bg-orange-50 border border-orange-200 rounded-xl px-5 py-3 mt-2">
+                <span class="text-sm font-semibold text-[#1e293b]">Expected Yield</span>
+                <span class="text-lg font-bold text-orange-600">{{ totalYield().toFixed(1) }} KG</span>
+              </div>
+            }
+          </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- ACTION BAR                                         -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div class="flex flex-col sm:flex-row gap-3 pt-2 pb-4">
+          <button type="button" (click)="onSaveRecipe()"
+            class="flex-1 sm:flex-[2] inline-flex items-center justify-center gap-2 py-3.5 px-6 rounded-xl text-white font-bold text-sm shadow-lg transition-all active:scale-[0.98]"
+            style="background: linear-gradient(135deg, #f97316, #ea580c); box-shadow: 0 4px 14px rgba(249,115,22,0.35);">
+            <span class="material-icons-round text-lg">check_circle</span>
+            Save Recipe
+          </button>
+          <button type="button" (click)="onReset()"
+            class="flex-1 py-3.5 px-6 rounded-xl border border-gray-200 bg-white text-[#1e293b] font-semibold text-sm hover:bg-gray-50 transition-colors">
+            Reset
+          </button>
+        </div>
+
+      </div>
     </section>
   `,
 })
@@ -241,226 +315,189 @@ export class RecipesAdminComponent {
   readonly recipes = this.masterData.recipes;
   readonly flavors = this.masterData.flavors;
 
-  readonly units: IngredientUnit[] = ['kg', 'L', 'g', 'ml', 'pcs', 'boxes'];
   readonly statusMessage = signal('');
 
-  readonly selectedIngredientId = signal('');
-  readonly selectedRecipeId = signal('');
+  // Section 1: Flavor
+  readonly flavorMode = signal<'create' | 'select'>('create');
+  readonly selectedFlavorControl = this.fb.control('');
+  readonly flavorNameControl = this.fb.control('', Validators.required);
+  readonly flavorCodeControl = this.fb.control('', Validators.required);
+  isSeasonalVariant = false;
 
-  readonly selectedRecipe = computed(() =>
-    this.recipes().find((recipe) => recipe.id === this.selectedRecipeId()) ?? null,
+  // Section 2: Recipe
+  readonly recipeNameControl = this.fb.control('', Validators.required);
+  readonly recipeCodeControl = this.fb.control('', Validators.required);
+  readonly recipeDescriptionControl = this.fb.control('');
+
+  // Section 3: BOM
+  readonly bomLines = signal<BomLine[]>([]);
+
+  readonly totalYield = computed(() =>
+    this.bomLines().reduce((sum, line) => sum + Math.max(0, line.qty || 0), 0),
   );
 
-  readonly selectedRecipeLines = computed(() =>
-    this.masterData.resolveRecipeIngredients(this.selectedRecipe()),
-  );
+  // ---------- Section 1 logic ----------
 
-  readonly selectedRecipeYield = computed(() => this.masterData.recipeYield(this.selectedRecipe()));
+  onExistingFlavorSelected(): void {
+    const flavorId = this.selectedFlavorControl.value ?? '';
+    const flavor = this.flavors().find((f) => f.id === flavorId);
+    if (!flavor) return;
 
-  readonly selectedRecipeFlavorNames = computed(() => {
-    const recipeId = this.selectedRecipeId();
-    if (!recipeId) {
-      return '';
+    this.flavorNameControl.setValue(flavor.name);
+    this.flavorCodeControl.setValue(flavor.code);
+
+    // If the flavor already has a recipe, populate Section 2 + 3
+    const recipe = this.masterData.getRecipeForFlavor(flavorId);
+    if (recipe) {
+      this.recipeNameControl.setValue(recipe.name);
+      this.recipeCodeControl.setValue(recipe.code);
+      this.recipeDescriptionControl.setValue(recipe.description);
+
+      const lines: BomLine[] = recipe.ingredients.map((line) => ({
+        id: crypto.randomUUID(),
+        ingredientId: line.ingredientId,
+        lotBatchCode: '',
+        qty: line.qty,
+      }));
+      this.bomLines.set(lines);
     }
+  }
 
-    const names = this.flavors()
-      .filter((flavor) => flavor.recipeId === recipeId)
-      .map((flavor) => flavor.name);
+  // ---------- Section 2 logic ----------
 
-    return names.join(', ');
-  });
+  regenerateCode(): void {
+    const code = this.flavorCodeControl.value?.trim() || 'XXX';
+    const date = new Date();
+    const yearMonth = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    this.recipeCodeControl.setValue(`GG-REC-${code}-${yearMonth}`);
+  }
 
-  readonly ingredientCreateForm = this.fb.nonNullable.group({
-    name: ['', Validators.required],
-    unit: ['kg' as IngredientUnit, Validators.required],
-  });
+  // ---------- Section 3 logic ----------
 
-  readonly ingredientConfigForm = this.fb.nonNullable.group({
-    name: ['', Validators.required],
-    unit: ['kg' as IngredientUnit, Validators.required],
-    active: [true],
-  });
+  addBomLine(): void {
+    this.bomLines.update((lines) => [
+      ...lines,
+      {
+        id: crypto.randomUUID(),
+        ingredientId: '',
+        lotBatchCode: '',
+        qty: 0,
+      },
+    ]);
+  }
 
-  readonly flavorCreateForm = this.fb.nonNullable.group({
-    name: ['', Validators.required],
-    code: ['', Validators.required],
-  });
+  removeBomLine(lineId: string): void {
+    this.bomLines.update((lines) => lines.filter((l) => l.id !== lineId));
+  }
 
-  readonly recipeCreateForm = this.fb.nonNullable.group({
-    name: ['', Validators.required],
-    code: ['', Validators.required],
-    description: [''],
-  });
+  onBomIngredientChange(lineId: string, event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    this.bomLines.update((lines) =>
+      lines.map((l) => (l.id === lineId ? { ...l, ingredientId: value } : l)),
+    );
+  }
 
-  readonly recipeConfigForm = this.fb.nonNullable.group({
-    name: ['', Validators.required],
-    code: ['', Validators.required],
-    description: [''],
-    active: [true],
-  });
+  onBomLotChange(lineId: string, event: Event): void {
+    const value = (event.target as HTMLInputElement).value;
+    this.bomLines.update((lines) =>
+      lines.map((l) => (l.id === lineId ? { ...l, lotBatchCode: value } : l)),
+    );
+  }
 
-  readonly recipeLineForm = this.fb.nonNullable.group({
-    ingredientId: ['', Validators.required],
-    qty: [0, [Validators.required, Validators.min(0.001)]],
-  });
+  onBomQtyChange(lineId: string, event: Event): void {
+    const value = Number((event.target as HTMLInputElement).value) || 0;
+    this.bomLines.update((lines) =>
+      lines.map((l) => (l.id === lineId ? { ...l, qty: value } : l)),
+    );
+  }
 
-  createIngredient(): void {
-    if (this.ingredientCreateForm.invalid) {
+  // ---------- Save / Reset ----------
+
+  onSaveRecipe(): void {
+    const flavorName = this.flavorNameControl.value?.trim();
+    const flavorCode = this.flavorCodeControl.value?.trim();
+    const recipeName = this.recipeNameControl.value?.trim();
+    const recipeCode = this.recipeCodeControl.value?.trim();
+
+    if (!flavorName || !flavorCode) {
+      this.statusMessage.set('Please provide a flavor name and code.');
+      return;
+    }
+    if (!recipeName || !recipeCode) {
+      this.statusMessage.set('Please provide a recipe name and code.');
       return;
     }
 
-    const values = this.ingredientCreateForm.getRawValue();
-    const created = this.masterData.createIngredient({
-      name: values.name,
-      unit: values.unit,
-    });
-
-    this.statusMessage.set(`Ingredient ${created.name} created.`);
-    this.ingredientCreateForm.reset({ name: '', unit: 'kg' });
-  }
-
-  onIngredientSelection(event: Event): void {
-    const ingredientId = (event.target as HTMLSelectElement).value;
-    this.selectedIngredientId.set(ingredientId);
-
-    const ingredient = this.ingredients().find((item) => item.id === ingredientId);
-    if (!ingredient) {
-      this.ingredientConfigForm.reset({ name: '', unit: 'kg', active: true });
+    const validLines = this.bomLines().filter((l) => l.ingredientId && l.qty > 0);
+    if (validLines.length === 0) {
+      this.statusMessage.set('Please add at least one ingredient with a quantity.');
       return;
     }
 
-    this.ingredientConfigForm.reset({
-      name: ingredient.name,
-      unit: ingredient.unit,
-      active: ingredient.active,
-    });
-  }
+    // Check if we are editing an existing flavor or creating a new one
+    const existingFlavorId = this.selectedFlavorControl.value;
+    let flavor = existingFlavorId ? this.flavors().find((f) => f.id === existingFlavorId) : null;
 
-  saveIngredientConfig(): void {
-    const ingredientId = this.selectedIngredientId();
-    if (!ingredientId || this.ingredientConfigForm.invalid) {
-      return;
+    if (!flavor) {
+      // Create new flavor
+      flavor = this.masterData.createFlavor({ name: flavorName, code: flavorCode });
+    } else {
+      // Update existing flavor
+      this.masterData.updateFlavor(flavor.id, { name: flavorName, code: flavorCode });
     }
 
-    const values = this.ingredientConfigForm.getRawValue();
-    this.masterData.updateIngredient(ingredientId, {
-      name: values.name,
-      unit: values.unit,
-      active: values.active,
-    });
+    // Check if the flavor already has a recipe to update
+    const existingRecipe = this.masterData.getRecipeForFlavor(flavor.id);
 
-    this.statusMessage.set(`Ingredient configuration saved.`);
-  }
+    if (existingRecipe) {
+      // Update existing recipe
+      this.masterData.updateRecipe(existingRecipe.id, {
+        name: recipeName,
+        code: recipeCode,
+        description: this.recipeDescriptionControl.value?.trim() || '',
+      });
 
-  createFlavor(): void {
-    if (this.flavorCreateForm.invalid) {
-      return;
+      // Clear and rebuild ingredients
+      const currentLines = existingRecipe.ingredients.map((l) => l.ingredientId);
+      currentLines.forEach((ingId) => this.masterData.removeRecipeIngredient(existingRecipe.id, ingId));
+      validLines.forEach((line) =>
+        this.masterData.upsertRecipeIngredient(existingRecipe.id, line.ingredientId, line.qty),
+      );
+
+      this.statusMessage.set(`Recipe "${recipeName}" updated successfully.`);
+    } else {
+      // Create new recipe
+      const newRecipe = this.masterData.createRecipe({
+        name: recipeName,
+        code: recipeCode,
+        description: this.recipeDescriptionControl.value?.trim() || '',
+      });
+
+      // Map flavor to recipe
+      this.masterData.mapFlavorToRecipe(flavor.id, newRecipe.id);
+
+      // Add ingredient lines
+      validLines.forEach((line) =>
+        this.masterData.upsertRecipeIngredient(newRecipe.id, line.ingredientId, line.qty),
+      );
+
+      this.statusMessage.set(`Recipe "${recipeName}" created and mapped to flavor "${flavorName}".`);
     }
 
-    const values = this.flavorCreateForm.getRawValue();
-    const created = this.masterData.createFlavor({
-      name: values.name,
-      code: values.code,
-    });
-
-    this.statusMessage.set(`Flavor ${created.name} created.`);
-    this.flavorCreateForm.reset({ name: '', code: '' });
+    // Auto-clear after 5 seconds
+    setTimeout(() => this.statusMessage.set(''), 5000);
   }
 
-  mapFlavorToRecipe(flavorId: string, event: Event): void {
-    const recipeIdValue = (event.target as HTMLSelectElement).value;
-    this.masterData.mapFlavorToRecipe(flavorId, recipeIdValue || null);
-    this.statusMessage.set('Flavor mapped to recipe.');
-  }
-
-  toggleFlavor(flavorId: string, event: Event): void {
-    const active = (event.target as HTMLInputElement).checked;
-    this.masterData.updateFlavor(flavorId, { active });
-    this.statusMessage.set(`Flavor status updated.`);
-  }
-
-  createRecipe(): void {
-    if (this.recipeCreateForm.invalid) {
-      return;
-    }
-
-    const values = this.recipeCreateForm.getRawValue();
-    const created = this.masterData.createRecipe({
-      name: values.name,
-      code: values.code,
-      description: values.description,
-    });
-
-    this.statusMessage.set(`Recipe ${created.name} created.`);
-    this.recipeCreateForm.reset({ name: '', code: '', description: '' });
-
-    this.selectedRecipeId.set(created.id);
-    this.recipeConfigForm.reset({
-      name: created.name,
-      code: created.code,
-      description: created.description,
-      active: created.active,
-    });
-  }
-
-  onRecipeSelection(event: Event): void {
-    const recipeId = (event.target as HTMLSelectElement).value;
-    this.selectedRecipeId.set(recipeId);
-
-    const recipe = this.recipes().find((item) => item.id === recipeId);
-    if (!recipe) {
-      this.recipeConfigForm.reset({ name: '', code: '', description: '', active: true });
-      return;
-    }
-
-    this.recipeConfigForm.reset({
-      name: recipe.name,
-      code: recipe.code,
-      description: recipe.description,
-      active: recipe.active,
-    });
-  }
-
-  saveRecipeConfig(): void {
-    const recipeId = this.selectedRecipeId();
-    if (!recipeId || this.recipeConfigForm.invalid) {
-      return;
-    }
-
-    const values = this.recipeConfigForm.getRawValue();
-    this.masterData.updateRecipe(recipeId, {
-      name: values.name,
-      code: values.code,
-      description: values.description,
-      active: values.active,
-    });
-
-    this.statusMessage.set('Recipe configuration saved.');
-  }
-
-  upsertRecipeLine(): void {
-    const recipeId = this.selectedRecipeId();
-    if (!recipeId || this.recipeLineForm.invalid) {
-      return;
-    }
-
-    const values = this.recipeLineForm.getRawValue();
-    this.masterData.upsertRecipeIngredient(recipeId, values.ingredientId, Number(values.qty));
-    this.statusMessage.set('Recipe ingredient line updated.');
-    this.recipeLineForm.reset({ ingredientId: '', qty: 0 });
-  }
-
-  removeRecipeLine(ingredientId: string): void {
-    const recipeId = this.selectedRecipeId();
-    if (!recipeId) {
-      return;
-    }
-
-    this.masterData.removeRecipeIngredient(recipeId, ingredientId);
-    this.statusMessage.set('Ingredient removed from recipe.');
-  }
-
-  trackByIngredient(_: number, ingredient: IngredientDefinition): string {
-    return ingredient.id;
+  onReset(): void {
+    this.flavorMode.set('create');
+    this.selectedFlavorControl.setValue('');
+    this.flavorNameControl.setValue('');
+    this.flavorCodeControl.setValue('');
+    this.isSeasonalVariant = false;
+    this.recipeNameControl.setValue('');
+    this.recipeCodeControl.setValue('');
+    this.recipeDescriptionControl.setValue('');
+    this.bomLines.set([]);
+    this.statusMessage.set('');
   }
 }

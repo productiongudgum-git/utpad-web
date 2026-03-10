@@ -16,10 +16,9 @@ import { TokenService } from '../../../core/auth/token.service';
       <div class="w-full max-w-sm">
         <!-- Logo / Header -->
         <div class="text-center mb-8">
-          <div class="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-primary/20">
-            <span class="material-icons-round text-white text-3xl">precision_manufacturing</span>
-          </div>
-          <h1 class="text-2xl font-bold text-text-main-light dark:text-text-main-dark tracking-tight">Utpad</h1>
+          <img src="gudgum-logo.webp" alt="Gud Gum" class="h-24 w-auto mx-auto mb-4 object-contain drop-shadow-sm dark:invert">
+
+
           <p class="text-sm text-text-sub-light dark:text-text-sub-dark mt-1">Manufacturing Operations</p>
         </div>
 
