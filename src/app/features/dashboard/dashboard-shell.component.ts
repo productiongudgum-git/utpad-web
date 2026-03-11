@@ -116,6 +116,12 @@ export class DashboardShellComponent {
 
   navItems: NavItem[] = [
     { label: 'Recipes', icon: 'science', route: 'recipes' },
+    { label: 'Inwarding', icon: 'input', route: 'inwarding' },
+    { label: 'Production', icon: 'precision_manufacturing', route: 'production' },
+    { label: 'Packing', icon: 'inventory_2', route: 'packing' },
+    { label: 'Dispatch', icon: 'local_shipping', route: 'dispatch' },
+    { label: 'Inventory', icon: 'warehouse', route: 'inventory' },
+    { label: 'Reports', icon: 'bar_chart', route: 'reports' },
     { label: 'Kanban Board', icon: 'view_kanban', route: 'kanban' },
     { label: 'Traceability', icon: 'account_tree', route: 'traceability' },
     { label: 'Alerts', icon: 'notifications_active', route: 'alerts' },
@@ -123,11 +129,11 @@ export class DashboardShellComponent {
   ];
 
   mobileNavItems: NavItem[] = [
-    { label: 'Recipes', icon: 'science', route: 'recipes' },
-    { label: 'Kanban', icon: 'view_kanban', route: 'kanban' },
-    { label: 'Trace', icon: 'account_tree', route: 'traceability' },
+    { label: 'Production', icon: 'precision_manufacturing', route: 'production' },
+    { label: 'Inventory', icon: 'warehouse', route: 'inventory' },
+    { label: 'Dispatch', icon: 'local_shipping', route: 'dispatch' },
     { label: 'Alerts', icon: 'notifications_active', route: 'alerts' },
-    { label: 'Users', icon: 'group', route: 'users' },
+    { label: 'Reports', icon: 'bar_chart', route: 'reports' },
   ];
 
   userName = () => this.authService.currentUser()?.name ?? 'User';

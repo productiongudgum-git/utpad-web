@@ -9,5 +9,5 @@ export const environment = {
   tokenRefreshBufferSeconds: 60,
   sessionTimeoutMinutes: 15,
   maxConcurrentSessions: 3,
-  useMockData: true,
+  useMockData: false,
 };

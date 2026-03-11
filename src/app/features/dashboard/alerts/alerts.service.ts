@@ -1,4 +1,4 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, inject, signal, computed } from '@angular/core';
 import { Alert } from '../../../shared/models/manufacturing.models';
 import { SupabaseService } from '../../../core/supabase.service';
 
@@ -8,6 +8,14 @@ export class AlertsService {
 
   private readonly _alerts = signal<Alert[]>([]);
   readonly alerts = this._alerts.asReadonly();
+
+  readonly criticalCount = computed(() =>
+    this._alerts().filter(a => a.severity === 'critical').length
+  );
+  readonly warningCount = computed(() =>
+    this._alerts().filter(a => a.severity === 'warning').length
+  );
+  readonly totalUnresolved = computed(() => this._alerts().length);
 
   async loadUnresolved(): Promise<void> {
     const { data, error } = await this.supabase.client

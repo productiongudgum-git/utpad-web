@@ -74,7 +74,7 @@ interface ExistingRecipeOption {
                 <select
                   [formControl]="selectedRecipeControl"
                   (change)="onExistingRecipeSelected()"
-                  class="block w-full rounded-lg border border-gray-200 bg-gray-50 text-sm text-[#1e293b] py-3 pl-10 pr-10 appearance-none focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition">
+                  class="dropdown-with-arrow block w-full rounded-lg border border-gray-200 bg-gray-50 text-sm text-[#1e293b] py-3 pl-10 pr-10 appearance-none focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition">
                   <option value="">Search existing recipes (e.g. Spearmint, Lemon Ice)...</option>
                   @for (recipeOption of existingRecipeOptions(); track recipeOption.id) {
                     <option [value]="recipeOption.id">{{ recipeOption.label }}</option>
@@ -82,9 +82,6 @@ interface ExistingRecipeOption {
                 </select>
                 <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
                   <span class="material-icons-round text-lg">search</span>
-                </div>
-                <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400">
-                  <span class="material-icons-round text-lg">expand_more</span>
                 </div>
               </div>
             </div>
@@ -107,6 +104,26 @@ interface ExistingRecipeOption {
                 <label class="block text-sm font-semibold text-[#1e293b] mb-2">Flavor Code</label>
                 <input type="text" [formControl]="flavorCodeControl" placeholder="FLV-XXX"
                   class="block w-full rounded-lg border border-gray-200 bg-gray-50 text-sm text-[#1e293b] py-3 px-4 uppercase focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition placeholder:text-gray-400">
+              </div>
+            </div>
+
+            <!-- Yield threshold + Shelf life -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-semibold text-[#1e293b] mb-2">
+                  Yield Threshold (%)
+                  <span class="text-xs font-normal text-gray-400 ml-1">— triggers low_yield alert</span>
+                </label>
+                <input type="number" [formControl]="yieldThresholdControl" placeholder="e.g. 85" min="0" max="100"
+                  class="block w-full rounded-lg border border-gray-200 bg-gray-50 text-sm text-[#1e293b] py-3 px-4 focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition placeholder:text-gray-400">
+              </div>
+              <div>
+                <label class="block text-sm font-semibold text-[#1e293b] mb-2">
+                  Shelf Life (days)
+                  <span class="text-xs font-normal text-gray-400 ml-1">— used for expiry alerts</span>
+                </label>
+                <input type="number" [formControl]="shelfLifeDaysControl" placeholder="e.g. 365" min="1"
+                  class="block w-full rounded-lg border border-gray-200 bg-gray-50 text-sm text-[#1e293b] py-3 px-4 focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition placeholder:text-gray-400">
               </div>
             </div>
 
@@ -177,6 +194,41 @@ interface ExistingRecipeOption {
           </div>
 
           <div class="px-6 pb-6 pt-4 space-y-3">
+            <!-- Create new ingredient master -->
+            <div class="rounded-xl border border-orange-200 bg-orange-50 p-4 space-y-3">
+              <p class="text-xs font-semibold uppercase tracking-wider text-orange-600">Ingredient Master</p>
+              <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                <div class="md:col-span-6">
+                  <label class="block text-xs font-semibold text-[#1e293b] mb-1.5">New Ingredient Name</label>
+                  <input
+                    type="text"
+                    [formControl]="newIngredientNameControl"
+                    placeholder="e.g. Menthol Crystals"
+                    class="block w-full rounded-lg border border-orange-200 bg-white text-sm text-[#1e293b] py-2.5 px-3 focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition placeholder:text-gray-400">
+                </div>
+                <div class="md:col-span-3">
+                  <label class="block text-xs font-semibold text-[#1e293b] mb-1.5">Unit</label>
+                  <select
+                    [formControl]="newIngredientUnitControl"
+                    class="dropdown-with-arrow block w-full rounded-lg border border-orange-200 bg-white text-sm text-[#1e293b] py-2.5 px-3 appearance-none focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition">
+                    @for (unit of ingredientUnits; track unit) {
+                      <option [value]="unit">{{ unit }}</option>
+                    }
+                  </select>
+                </div>
+                <div class="md:col-span-3">
+                  <button
+                    type="button"
+                    (click)="onCreateIngredient()"
+                    class="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-white border border-orange-300 text-orange-700 font-semibold text-sm px-3 py-2.5 hover:bg-orange-100 transition">
+                    <span class="material-icons-round text-base">add</span>
+                    Add To List
+                  </button>
+                </div>
+              </div>
+              <p class="text-xs text-orange-700">Add a new ingredient here, then select it in the Ingredient Selector rows below.</p>
+            </div>
+
             <!-- Column headers -->
             @if (bomLines().length > 0) {
               <div class="grid grid-cols-12 gap-3 text-xs font-semibold uppercase tracking-wider text-gray-400 px-1">
@@ -196,15 +248,12 @@ interface ExistingRecipeOption {
                     <select
                       [value]="line.ingredientId"
                       (change)="onBomIngredientChange(line.id, $event)"
-                      class="block w-full rounded-lg border border-gray-200 bg-white text-sm text-[#1e293b] py-2.5 pl-3 pr-8 appearance-none focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition">
+                      class="dropdown-with-arrow block w-full rounded-lg border border-gray-200 bg-white text-sm text-[#1e293b] py-2.5 pl-3 pr-8 appearance-none focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition">
                       <option value="">Select...</option>
                       @for (ing of ingredients(); track ing.id) {
                         <option [value]="ing.id">{{ ing.name }}</option>
                       }
                     </select>
-                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-gray-400">
-                      <span class="material-icons-round text-sm">expand_more</span>
-                    </div>
                   </div>
                 </div>
 
@@ -292,6 +341,8 @@ export class RecipesAdminComponent {
   readonly selectedRecipeControl = this.fb.control('');
   readonly flavorNameControl = this.fb.control('', Validators.required);
   readonly flavorCodeControl = this.fb.control('', Validators.required);
+  readonly yieldThresholdControl = this.fb.control<number | null>(null);
+  readonly shelfLifeDaysControl = this.fb.control<number | null>(null);
   isSeasonalVariant = false;
 
   // Section 2: Recipe
@@ -301,6 +352,9 @@ export class RecipesAdminComponent {
 
   // Section 3: BOM
   readonly bomLines = signal<BomLine[]>([]);
+  readonly ingredientUnits: IngredientUnit[] = ['kg', 'L', 'g', 'ml', 'pcs', 'boxes'];
+  readonly newIngredientNameControl = this.fb.control('', Validators.required);
+  readonly newIngredientUnitControl = this.fb.nonNullable.control<IngredientUnit>('kg');
 
   readonly totalYield = computed(() =>
     this.bomLines().reduce((sum, line) => sum + Math.max(0, line.qty || 0), 0),
@@ -391,6 +445,60 @@ export class RecipesAdminComponent {
     this.bomLines.update((lines) =>
       lines.map((l) => (l.id === lineId ? { ...l, qty: value } : l)),
     );
+  }
+
+  onCreateIngredient(): void {
+    const name = this.newIngredientNameControl.value?.trim() ?? '';
+    const unit = this.newIngredientUnitControl.value;
+
+    if (!name) {
+      this.statusMessage.set('Please enter an ingredient name to add.');
+      return;
+    }
+
+    const existing = this.ingredients().find(
+      (ingredient) => ingredient.name.trim().toLowerCase() === name.toLowerCase(),
+    );
+
+    if (existing) {
+      this.attachIngredientToBom(existing.id);
+      this.statusMessage.set(`Ingredient "${existing.name}" already exists and is now selected.`);
+      setTimeout(() => this.statusMessage.set(''), 4000);
+      return;
+    }
+
+    this.masterData.createIngredient({ name, unit }).subscribe({
+      next: (ingredient) => {
+        this.attachIngredientToBom(ingredient.id);
+        this.newIngredientNameControl.setValue('');
+        this.statusMessage.set(`Ingredient "${ingredient.name}" added to list.`);
+        setTimeout(() => this.statusMessage.set(''), 4000);
+      },
+      error: (err) => {
+        this.statusMessage.set(`Error creating ingredient: ${err.message}`);
+      },
+    });
+  }
+
+  private attachIngredientToBom(ingredientId: string): void {
+    const firstEmpty = this.bomLines().find((line) => !line.ingredientId);
+
+    if (firstEmpty) {
+      this.bomLines.update((lines) =>
+        lines.map((line) => (line.id === firstEmpty.id ? { ...line, ingredientId } : line)),
+      );
+      return;
+    }
+
+    this.bomLines.update((lines) => [
+      ...lines,
+      {
+        id: crypto.randomUUID(),
+        ingredientId,
+        lotBatchCode: '',
+        qty: 0,
+      },
+    ]);
   }
 
   // ---------- Save / Reset ----------
@@ -528,10 +636,14 @@ export class RecipesAdminComponent {
     this.selectedRecipeControl.setValue('');
     this.flavorNameControl.setValue('');
     this.flavorCodeControl.setValue('');
+    this.yieldThresholdControl.setValue(null);
+    this.shelfLifeDaysControl.setValue(null);
     this.isSeasonalVariant = false;
     this.recipeNameControl.setValue('');
     this.recipeCodeControl.setValue('');
     this.recipeDescriptionControl.setValue('');
+    this.newIngredientNameControl.setValue('');
+    this.newIngredientUnitControl.setValue('kg');
     this.bomLines.set([]);
     this.statusMessage.set('');
   }

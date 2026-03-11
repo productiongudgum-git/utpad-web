@@ -850,6 +850,46 @@ app.patch('/api/v1/ops/workers/:workerId/credentials', async (req, res) => {
   }
 });
 
+app.delete('/api/v1/ops/workers/:workerId', async (req, res) => {
+  const workerId = safeText(req.params.workerId, '');
+  if (!workerId) {
+    res.status(400).json({ error: 'invalid_worker_id', message: 'workerId path parameter is required.' });
+    return;
+  }
+
+  try {
+    if (SUPABASE_ENABLED) {
+      await supabaseRequest(`ops_workers?worker_id=eq.${encodeURIComponent(workerId)}`, {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' },
+      });
+      res.status(204).send();
+      return;
+    }
+
+    if (!fallbackWorkers.has(workerId)) {
+      res.status(404).json({ error: 'worker_not_found', message: `Worker ${workerId} does not exist.` });
+      return;
+    }
+
+    fallbackWorkers.delete(workerId);
+    res.status(204).send();
+  } catch (error) {
+    console.error('Worker deletion failed.', error);
+    if (error instanceof Error && error.message.includes('foreign key constraint')) {
+      res.status(409).json({
+        error: 'foreign_key_violation',
+        message: 'Cannot delete worker because they are linked to existing operation events. Please deactivate instead.',
+      });
+      return;
+    }
+    res.status(500).json({
+      error: 'worker_deletion_failed',
+      message: error instanceof Error ? error.message : 'Unable to delete worker.',
+    });
+  }
+});
+
 app.patch('/api/v1/ops/workers/:workerId/active', async (req, res) => {
   const workerId = safeText(req.params.workerId, '');
   if (!workerId) {

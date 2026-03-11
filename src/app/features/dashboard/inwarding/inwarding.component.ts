@@ -1,319 +1,90 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
-import { MockDataService } from '../../../core/services/mock-data.service';
-import { OperationsLiveService } from '../../../core/services/operations-live.service';
-import { RecipeMasterDataService, IngredientUnit } from '../../../core/services/recipe-master-data.service';
+import { SupabaseService } from '../../../core/supabase.service';
+import { InwardEvent } from '../../../shared/models/manufacturing.models';
 
 @Component({
   selector: 'app-inwarding',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule],
+  imports: [CommonModule],
   template: `
-    <div class="max-w-md mx-auto min-h-full flex flex-col relative bg-background-light dark:bg-background-dark">
-      <!-- Header -->
-      <header class="bg-surface-light dark:bg-surface-dark px-4 py-4 shadow-sm sticky top-0 z-10 border-b border-border-light dark:border-border-dark flex items-center justify-between">
-        <div class="flex items-center space-x-3">
-          <h1 class="text-lg font-bold text-text-main-light dark:text-text-main-dark tracking-tight">Inwarding Material</h1>
-        </div>
-        <button class="p-2 rounded-full text-text-sub-light dark:text-text-sub-dark hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-          <span class="material-icons-outlined">history</span>
-        </button>
-      </header>
-
-      <!-- Main Content -->
-      <main class="flex-1 overflow-y-auto p-4 space-y-6 pb-28">
-        <!-- Details Section -->
-        <div class="space-y-4">
-          <h2 class="text-sm font-semibold uppercase tracking-wider text-text-sub-light dark:text-text-sub-dark mb-2">Details</h2>
-
-          <!-- Ingredient Select -->
-          <div class="bg-surface-light dark:bg-surface-dark p-4 rounded-xl shadow-sm border border-border-light dark:border-border-dark">
-            <label class="block text-sm font-medium text-text-sub-light dark:text-text-sub-dark mb-1">Select Ingredient</label>
-            <div class="flex space-x-2">
-              <div class="relative flex-1">
-                <select [formControl]="form.controls.ingredientId"
-                        (change)="onIngredientSelected()"
-                        class="dropdown-with-arrow block w-full rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-700 text-text-main-light dark:text-text-main-dark focus:ring-primary focus:border-primary text-sm py-2.5 pl-3 pr-10 appearance-none">
-                  <option value="">Select Ingredient...</option>
-                  @for (ing of ingredients(); track ing.id) {
-                    <option [value]="ing.id">{{ ing.name }}</option>
-                  }
-                </select>
-              </div>
-              <button (click)="toggleNewIngredientForm()"
-                      class="flex items-center justify-center px-3 bg-primary bg-opacity-10 dark:bg-opacity-20 rounded-lg text-primary font-medium hover:bg-opacity-20 transition-colors"
-                      [title]="showNewIngredientForm() ? 'Cancel' : 'Add new ingredient'">
-                <span class="material-icons-round">{{ showNewIngredientForm() ? 'close' : 'add' }}</span>
-              </button>
-            </div>
-
-            <!-- Inline add ingredient form -->
-            @if (showNewIngredientForm()) {
-              <div class="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 space-y-3">
-                <p class="text-xs font-semibold uppercase tracking-wider text-primary">Add New Ingredient</p>
-                <div class="flex space-x-2">
-                  <input [formControl]="newIngredientName" type="text" placeholder="Ingredient name"
-                         class="flex-1 block rounded-lg border-border-light dark:border-border-dark bg-white dark:bg-gray-700 text-text-main-light dark:text-text-main-dark focus:ring-primary focus:border-primary text-sm py-2 px-3" />
-                  <select [formControl]="newIngredientUnit"
-                          class="rounded-lg border-border-light dark:border-border-dark bg-white dark:bg-gray-700 text-text-main-light dark:text-text-main-dark text-sm py-2 px-2">
-                    @for (unit of ingredientUnits; track unit) {
-                      <option [value]="unit">{{ unit }}</option>
-                    }
-                  </select>
-                </div>
-                <div class="flex items-center space-x-2">
-                  <button (click)="onCreateIngredient()"
-                          [disabled]="!newIngredientName.value?.trim()"
-                          class="flex items-center space-x-1 px-3 py-1.5 bg-primary text-white rounded-lg text-xs font-bold hover:bg-primary-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-                    <span class="material-icons-round text-sm">add_circle</span>
-                    <span>Create & Select</span>
-                  </button>
-                  <button (click)="toggleNewIngredientForm()"
-                          class="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                    Cancel
-                  </button>
-                </div>
-                @if (newIngredientMessage()) {
-                  <p class="text-xs" [class]="newIngredientMessage().startsWith('Error') ? 'text-red-600' : 'text-green-600'">{{ newIngredientMessage() }}</p>
-                }
-              </div>
-            }
-          </div>
-
-          <!-- Batch Barcode -->
-          <div class="bg-surface-light dark:bg-surface-dark p-4 rounded-xl shadow-sm border border-border-light dark:border-border-dark">
-            <label class="block text-sm font-medium text-text-sub-light dark:text-text-sub-dark mb-1">Batch Barcode</label>
-            <div class="flex space-x-2">
-              <input [formControl]="form.controls.batchBarcode" type="text" placeholder="Scan or enter barcode"
-                     class="block w-full rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-700 text-text-main-light dark:text-text-main-dark placeholder-text-sub-light dark:placeholder-text-sub-dark focus:ring-primary focus:border-primary text-sm py-2.5">
-              <button class="flex items-center justify-center px-4 bg-gray-800 text-white dark:bg-gray-600 rounded-lg shadow-sm hover:bg-gray-700 dark:hover:bg-gray-500 transition-colors">
-                <span class="material-icons-outlined">qr_code_scanner</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- Quantity + Unit grid -->
-          <div class="grid grid-cols-2 gap-4">
-            <div class="bg-surface-light dark:bg-surface-dark p-4 rounded-xl shadow-sm border border-border-light dark:border-border-dark">
-              <label class="block text-sm font-medium text-text-sub-light dark:text-text-sub-dark mb-1">Quantity</label>
-              <input [formControl]="form.controls.quantity" type="number" placeholder="0.00"
-                     class="block w-full rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-700 text-text-main-light dark:text-text-main-dark focus:ring-primary focus:border-primary text-lg font-semibold py-2">
-            </div>
-            <div class="bg-surface-light dark:bg-surface-dark p-4 rounded-xl shadow-sm border border-border-light dark:border-border-dark">
-              <label class="block text-sm font-medium text-text-sub-light dark:text-text-sub-dark mb-1">Unit</label>
-              <div class="relative">
-                <select [formControl]="form.controls.unit"
-                        class="dropdown-with-arrow block w-full rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-700 text-text-main-light dark:text-text-main-dark focus:ring-primary focus:border-primary text-sm py-2.5 appearance-none">
-                  <option value="kg">kg</option>
-                  <option value="L">L</option>
-                  <option value="pcs">pcs</option>
-                  <option value="boxes">boxes</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <!-- Expiry + Vendor -->
-          <div class="bg-surface-light dark:bg-surface-dark p-4 rounded-xl shadow-sm border border-border-light dark:border-border-dark space-y-4">
-            <div>
-              <label class="block text-sm font-medium text-text-sub-light dark:text-text-sub-dark mb-1">Expiry Date</label>
-              <input [formControl]="form.controls.expiryDate" type="date"
-                     class="block w-full rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-700 text-text-main-light dark:text-text-main-dark focus:ring-primary focus:border-primary text-sm py-2.5">
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-text-sub-light dark:text-text-sub-dark mb-1">Vendor</label>
-              <div class="relative">
-                <select [formControl]="form.controls.vendorId"
-                        class="dropdown-with-arrow block w-full rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-700 text-text-main-light dark:text-text-main-dark focus:ring-primary focus:border-primary text-sm py-2.5 appearance-none">
-                  <option value="">Select Vendor...</option>
-                  @for (v of vendors; track v.id) {
-                    <option [value]="v.id">{{ v.name }}</option>
-                  }
-                </select>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Billing Section -->
-        <div class="space-y-4">
-          <h2 class="text-sm font-semibold uppercase tracking-wider text-text-sub-light dark:text-text-sub-dark mb-2">Billing</h2>
-          <div class="bg-surface-light dark:bg-surface-dark p-4 rounded-xl shadow-sm border border-border-light dark:border-border-dark space-y-4">
-            <div>
-              <label class="block text-sm font-medium text-text-sub-light dark:text-text-sub-dark mb-1">Bill Number</label>
-              <input [formControl]="form.controls.billNumber" type="text" placeholder="Enter bill number"
-                     class="block w-full rounded-lg border-border-light dark:border-border-dark bg-gray-50 dark:bg-gray-700 text-text-main-light dark:text-text-main-dark placeholder-text-sub-light dark:placeholder-text-sub-dark focus:ring-primary focus:border-primary text-sm py-2.5">
-            </div>
-            <div class="border-t border-dashed border-border-light dark:border-border-dark pt-4">
-              <label class="block text-sm font-medium text-text-sub-light dark:text-text-sub-dark mb-2">Upload Bill Image</label>
-              <div class="flex items-center justify-center w-full">
-                <label class="flex flex-col items-center justify-center w-full h-32 border-2 border-primary border-dashed rounded-xl cursor-pointer bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors">
-                  <div class="flex flex-col items-center justify-center pt-5 pb-6">
-                    <span class="material-icons-round text-3xl text-primary mb-2">photo_camera</span>
-                    <p class="mb-1 text-sm text-text-sub-light dark:text-text-sub-dark"><span class="font-semibold text-primary">Tap to capture</span> or upload</p>
-                  </div>
-                  <input type="file" class="hidden" (change)="onFileSelected($event)" accept="image/*">
-                </label>
-              </div>
-              @if (selectedFileName()) {
-                <div class="mt-3 flex items-center space-x-3 bg-gray-50 dark:bg-gray-700 p-2 rounded-lg">
-                  <span class="material-icons-round text-gray-400">description</span>
-                  <div class="flex-1 overflow-hidden">
-                    <p class="text-xs font-medium text-text-main-light dark:text-text-main-dark truncate">{{ selectedFileName() }}</p>
-                  </div>
-                  <button (click)="removeFile()" class="text-red-500 hover:text-red-600">
-                    <span class="material-icons-round text-sm">close</span>
-                  </button>
-                </div>
-              }
-            </div>
-          </div>
-        </div>
-
-        @if (submitMessage()) {
-          <div class="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-300">
-            {{ submitMessage() }}
-          </div>
-        }
-      </main>
-
-      <!-- Bottom Action Bar -->
-      <div class="sticky bottom-0 left-0 w-full bg-surface-light dark:bg-surface-dark border-t border-border-light dark:border-border-dark p-4 z-20 shadow-lg">
-        <div class="flex space-x-4">
-          <button (click)="onReset()"
-                  class="flex-1 py-3.5 px-4 border border-border-light dark:border-border-dark rounded-xl text-text-main-light dark:text-text-main-dark font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-            Reset
-          </button>
-          <button (click)="onConfirm()"
-                  class="flex-1 py-3.5 px-4 bg-primary text-white rounded-xl font-bold shadow-md hover:bg-primary-hover transition-colors flex items-center justify-center space-x-2">
-            <span class="material-icons-round text-sm">save</span>
-            <span>Confirm Inward</span>
-          </button>
-        </div>
+    <div class="p-6">
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="text-2xl font-bold text-gray-900">Inwarding Records</h2>
+        <button (click)="load()" class="text-sm text-blue-600 hover:underline">Refresh</button>
       </div>
+
+      @if (loading()) {
+        <div class="text-center py-8 text-gray-500">Loading...</div>
+      } @else if (events().length === 0) {
+        <div class="text-center py-8 text-gray-400">No inward records yet.</div>
+      } @else {
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200 text-sm">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-4 py-3 text-left font-medium text-gray-500">Ingredient</th>
+                <th class="px-4 py-3 text-right font-medium text-gray-500">Qty</th>
+                <th class="px-4 py-3 text-left font-medium text-gray-500">Unit</th>
+                <th class="px-4 py-3 text-left font-medium text-gray-500">Date</th>
+                <th class="px-4 py-3 text-left font-medium text-gray-500">Lot Ref</th>
+                <th class="px-4 py-3 text-left font-medium text-gray-500">Supplier</th>
+                <th class="px-4 py-3 text-left font-medium text-gray-500">Expiry</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100 bg-white">
+              @for (event of events(); track event.id) {
+                <tr class="hover:bg-gray-50" [class.bg-red-50]="isExpiringSoon(event.expiry_date)">
+                  <td class="px-4 py-3 font-medium">{{ event.ingredient?.name ?? event.ingredient_id }}</td>
+                  <td class="px-4 py-3 text-right font-semibold">{{ event.qty }}</td>
+                  <td class="px-4 py-3 text-gray-500">{{ event.unit }}</td>
+                  <td class="px-4 py-3">{{ event.inward_date }}</td>
+                  <td class="px-4 py-3 font-mono text-xs">{{ event.lot_ref ?? '—' }}</td>
+                  <td class="px-4 py-3">{{ event.supplier ?? '—' }}</td>
+                  <td class="px-4 py-3" [class.text-red-600]="isExpiringSoon(event.expiry_date)">
+                    {{ event.expiry_date ?? '—' }}
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
     </div>
   `,
 })
-export class InwardingComponent {
-  private readonly fb = inject(FormBuilder);
-  private readonly masterData = inject(RecipeMasterDataService);
-  private readonly mockData = inject(MockDataService);
-  private readonly operations = inject(OperationsLiveService);
+export class InwardingComponent implements OnInit {
+  private supabase = inject(SupabaseService);
 
-  ingredients = this.masterData.activeIngredients;
-  vendors = this.mockData.getVendors();
-  selectedFileName = signal('');
-  submitMessage = signal('');
+  events = signal<InwardEvent[]>([]);
+  loading = signal(false);
 
-  // New ingredient form state
-  showNewIngredientForm = signal(false);
-  newIngredientMessage = signal('');
-  readonly ingredientUnits: IngredientUnit[] = ['kg', 'L', 'g', 'ml', 'pcs', 'boxes'];
-  readonly newIngredientName = this.fb.control('', Validators.required);
-  readonly newIngredientUnit = this.fb.nonNullable.control<IngredientUnit>('kg');
-
-  form = this.fb.nonNullable.group({
-    ingredientId: ['', Validators.required],
-    batchBarcode: [''],
-    quantity: [0, [Validators.required, Validators.min(0.01)]],
-    unit: ['kg'],
-    expiryDate: [''],
-    vendorId: ['', Validators.required],
-    billNumber: [''],
-  });
-
-  onFileSelected(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    if (file) {
-      this.selectedFileName.set(file.name);
-    }
+  ngOnInit(): void {
+    this.load();
+    this.subscribeRealtime();
   }
 
-  removeFile(): void {
-    this.selectedFileName.set('');
+  async load(): Promise<void> {
+    this.loading.set(true);
+    const { data, error } = await this.supabase.client
+      .from('inward_events')
+      .select('*, ingredient:recipe_ingredients(id,name,unit,active)')
+      .order('inward_date', { ascending: false })
+      .limit(100);
+    if (!error && data) this.events.set(data as InwardEvent[]);
+    this.loading.set(false);
   }
 
-  toggleNewIngredientForm(): void {
-    this.showNewIngredientForm.update(v => !v);
-    this.newIngredientMessage.set('');
-    this.newIngredientName.setValue('');
-    this.newIngredientUnit.setValue('kg');
+  subscribeRealtime(): void {
+    this.supabase.client
+      .channel('inwarding-rt')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'inward_events' }, () => this.load())
+      .subscribe();
   }
 
-  onCreateIngredient(): void {
-    const name = this.newIngredientName.value?.trim() ?? '';
-    const unit = this.newIngredientUnit.value;
-    if (!name) {
-      this.newIngredientMessage.set('Please enter an ingredient name.');
-      return;
-    }
-
-    // Check if already exists
-    const existing = this.ingredients().find(
-      (ing) => ing.name.trim().toLowerCase() === name.toLowerCase(),
-    );
-    if (existing) {
-      this.form.controls.ingredientId.setValue(existing.id);
-      this.form.controls.unit.setValue(existing.unit);
-      this.newIngredientMessage.set(`"${existing.name}" already exists — selected it for you.`);
-      this.showNewIngredientForm.set(false);
-      return;
-    }
-
-    this.masterData.createIngredient({ name, unit }).subscribe({
-      next: (ingredient) => {
-        this.form.controls.ingredientId.setValue(ingredient.id);
-        this.form.controls.unit.setValue(ingredient.unit);
-        this.newIngredientName.setValue('');
-        this.newIngredientMessage.set('');
-        this.showNewIngredientForm.set(false);
-        this.submitMessage.set(`Ingredient "${ingredient.name}" created and selected.`);
-      },
-      error: (err: Error) => {
-        this.newIngredientMessage.set(`Error creating ingredient: ${err.message}`);
-      },
-    });
-  }
-
-  onIngredientSelected(): void {
-    const ingredient = this.ingredients().find((item) => item.id === this.form.controls.ingredientId.value);
-    if (ingredient) {
-      this.form.controls.unit.setValue(ingredient.unit);
-    }
-  }
-
-  onReset(): void {
-    this.form.reset({ unit: 'kg', quantity: 0 });
-    this.selectedFileName.set('');
-    this.submitMessage.set('');
-  }
-
-  async onConfirm(): Promise<void> {
-    if (this.form.valid) {
-      const ingredient = this.ingredients().find((item) => item.id === this.form.controls.ingredientId.value);
-      const vendor = this.vendors.find((item) => item.id === this.form.controls.vendorId.value);
-      const quantity = Number(this.form.controls.quantity.value) || 0;
-
-      try {
-        const event = await this.operations.submitInwarding({
-          ingredientName: ingredient?.name ?? 'Unknown Ingredient',
-          quantity,
-          unit: this.form.controls.unit.value || 'kg',
-          batchBarcode: this.form.controls.batchBarcode.value || '',
-          vendorName: vendor?.name ?? 'Unknown Vendor',
-          billNumber: this.form.controls.billNumber.value || '',
-        });
-
-        this.submitMessage.set(
-          `Inwarding logged by ${event.workerName} at ${new Date(event.createdAt).toLocaleTimeString()}.`,
-        );
-        this.form.reset({ unit: 'kg', quantity: 0 });
-        this.selectedFileName.set('');
-      } catch {
-        this.submitMessage.set('Unable to submit inwarding right now.');
-      }
-    }
+  isExpiringSoon(expiryDate: string | null): boolean {
+    if (!expiryDate) return false;
+    const daysUntilExpiry = (new Date(expiryDate).getTime() - Date.now()) / 86400000;
+    return daysUntilExpiry <= 7;
   }
 }
