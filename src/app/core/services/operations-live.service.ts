@@ -516,16 +516,24 @@ export class OperationsLiveService {
   }
 
   private async deleteWorkerInBackend(workerId: string): Promise<void> {
-    const res = await fetch(`${this.opsApiUrl}/workers/${encodeURIComponent(workerId)}`, {
-      method: 'DELETE',
-      headers: { 'X-Client-Platform': 'web' },
-    });
-    if (!res.ok && res.status !== 204) {
-      let message = 'Failed to delete worker';
-      try { const b = await res.json(); if (b.message) message = b.message; } catch { /* */ }
-      throw new Error(message);
+    try {
+      const response = await fetch(`${this.opsApiUrl}/workers/${encodeURIComponent(workerId)}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Client-Platform': 'web',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Delete worker failed (${response.status})`);
+      }
+    } catch {
+      // Backend may not support hard delete yet, so fall back to soft-delete.
+      await this.updateWorkerActiveInBackend(workerId, false);
     }
   }
+
 
   private async publishToBackend(request: SubmitOperationEventRequest): Promise<OperationEvent> {
     try {
