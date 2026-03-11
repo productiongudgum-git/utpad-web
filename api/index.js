@@ -791,6 +791,65 @@ app.patch('/api/v1/ops/workers/:workerId/access', async (req, res) => {
   }
 });
 
+app.patch('/api/v1/ops/workers/:workerId/credentials', async (req, res) => {
+  const workerId = safeText(req.params.workerId, '');
+  if (!workerId) {
+    res.status(400).json({ error: 'invalid_worker_id', message: 'workerId path parameter is required.' });
+    return;
+  }
+
+  const newPhone = typeof req.body?.phone === 'string' && req.body.phone.trim().length > 0 ? req.body.phone.trim() : undefined;
+  const newPin = typeof req.body?.pin === 'string' && req.body.pin.trim().length > 0 ? req.body.pin.trim() : undefined;
+
+  if (!newPhone && !newPin) {
+    res.status(400).json({ error: 'missing_fields', message: 'Provide at least one of phone or pin.' });
+    return;
+  }
+
+  const patchBody = {};
+  if (newPhone) patchBody['phone'] = newPhone;
+  if (newPin) patchBody['pin'] = newPin;
+
+  try {
+    if (SUPABASE_ENABLED) {
+      const rows = await supabaseRequest(
+        `ops_workers?worker_id=eq.${encodeURIComponent(workerId)}&select=worker_id,name,phone,pin,worker_role,active,created_at`,
+        {
+          method: 'PATCH',
+          headers: { Prefer: 'return=representation' },
+          body: patchBody,
+        },
+      );
+
+      if (rows.length === 0) {
+        res.status(404).json({ error: 'worker_not_found', message: `Worker ${workerId} does not exist.` });
+        return;
+      }
+
+      const stored = await fetchWorkerByIdFromSupabase(workerId);
+      res.json(stored);
+      return;
+    }
+
+    const existing = fallbackWorkers.get(workerId);
+    if (!existing) {
+      res.status(404).json({ error: 'worker_not_found', message: `Worker ${workerId} does not exist.` });
+      return;
+    }
+
+    if (newPhone) existing.phone = newPhone;
+    if (newPin) existing.pin = newPin;
+    fallbackWorkers.set(workerId, existing);
+    res.json(existing);
+  } catch (error) {
+    console.error('Worker credentials update failed.', error);
+    res.status(500).json({
+      error: 'worker_credentials_update_failed',
+      message: error instanceof Error ? error.message : 'Unable to update worker credentials.',
+    });
+  }
+});
+
 app.patch('/api/v1/ops/workers/:workerId/active', async (req, res) => {
   const workerId = safeText(req.params.workerId, '');
   if (!workerId) {
