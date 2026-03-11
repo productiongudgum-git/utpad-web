@@ -405,16 +405,9 @@ export class RecipesAdminComponent {
       this.statusMessage.set('Please provide a flavor name and code.');
       return;
     }
-    if (!recipeName || !recipeCode) {
-      this.statusMessage.set('Please provide a recipe name and code.');
-      return;
-    }
-
+    const hasRecipeIdentity = Boolean(recipeName || recipeCode);
     const validLines = this.bomLines().filter((l) => l.ingredientId && l.qty > 0);
-    if (validLines.length === 0) {
-      this.statusMessage.set('Please add at least one ingredient with a quantity.');
-      return;
-    }
+    const hasRecipeData = hasRecipeIdentity || validLines.length > 0;
 
     // Determine flavor
     const selectedRecipeId = this.selectedRecipeControl.value ?? '';
@@ -433,6 +426,41 @@ export class RecipesAdminComponent {
       } else {
         flavorFlow$ = this.masterData.createFlavor({ name: flavorName, code: flavorCode });
       }
+    }
+
+    // Flavor-only save path: allows adding/updating flavor master data without recipe/BOM.
+    if (!hasRecipeData) {
+      import('rxjs').then(({ of, switchMap }) => {
+        flavorFlow$.pipe(
+          switchMap((flavor) => {
+            if (!selectedRecipeId) {
+              return of(flavor);
+            }
+
+            return this.masterData.mapFlavorToRecipe(flavor.id, selectedRecipeId);
+          }),
+        ).subscribe({
+          next: () => {
+            this.masterData.refreshAll();
+            this.statusMessage.set(`Flavor "${flavorName}" saved successfully.`);
+            setTimeout(() => this.statusMessage.set(''), 5000);
+            this.onReset();
+          },
+          error: (err) => {
+            this.statusMessage.set(`Error saving flavor: ${err.message}`);
+          },
+        });
+      });
+      return;
+    }
+
+    if (!recipeName || !recipeCode) {
+      this.statusMessage.set('Please provide a recipe name and code.');
+      return;
+    }
+    if (validLines.length === 0) {
+      this.statusMessage.set('Please add at least one ingredient with a quantity.');
+      return;
     }
 
     import('rxjs').then(({ switchMap, of }) => {
