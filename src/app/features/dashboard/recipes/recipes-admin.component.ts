@@ -10,7 +10,6 @@ import {
 interface BomLine {
   id: string;
   ingredientId: string;
-  lotBatchCode: string;
   qty: number;
 }
 
@@ -232,8 +231,7 @@ interface ExistingRecipeOption {
             <!-- Column headers -->
             @if (bomLines().length > 0) {
               <div class="grid grid-cols-12 gap-3 text-xs font-semibold uppercase tracking-wider text-gray-400 px-1">
-                <div class="col-span-5">Ingredient Selector</div>
-                <div class="col-span-3">Lot/Batch Code</div>
+                <div class="col-span-8">Ingredient Selector</div>
                 <div class="col-span-3">Quantity</div>
                 <div class="col-span-1"></div>
               </div>
@@ -243,7 +241,7 @@ interface ExistingRecipeOption {
             @for (line of bomLines(); track line.id; let i = $index) {
               <div class="grid grid-cols-12 gap-3 items-center bg-gray-50 rounded-xl border border-gray-100 p-3">
                 <!-- Ingredient dropdown -->
-                <div class="col-span-5">
+                <div class="col-span-8">
                   <div class="relative">
                     <select
                       [value]="line.ingredientId"
@@ -255,15 +253,6 @@ interface ExistingRecipeOption {
                       }
                     </select>
                   </div>
-                </div>
-
-                <!-- Lot/Batch Code -->
-                <div class="col-span-3">
-                  <input type="text"
-                    [value]="line.lotBatchCode"
-                    (input)="onBomLotChange(line.id, $event)"
-                    placeholder="BATCH-XXX"
-                    class="block w-full rounded-lg border border-gray-200 bg-white text-sm text-[#1e293b] py-2.5 px-3 focus:ring-2 focus:ring-orange-300 focus:border-orange-400 transition placeholder:text-gray-400 uppercase">
                 </div>
 
                 <!-- Quantity -->
@@ -389,7 +378,6 @@ export class RecipesAdminComponent {
     const lines: BomLine[] = recipe.ingredientLines.map((line) => ({
       id: crypto.randomUUID(),
       ingredientId: line.ingredientId,
-      lotBatchCode: '',
       qty: line.qty,
     }));
     this.bomLines.set(lines);
@@ -416,7 +404,6 @@ export class RecipesAdminComponent {
       {
         id: crypto.randomUUID(),
         ingredientId: '',
-        lotBatchCode: '',
         qty: 0,
       },
     ]);
@@ -430,13 +417,6 @@ export class RecipesAdminComponent {
     const value = (event.target as HTMLSelectElement).value;
     this.bomLines.update((lines) =>
       lines.map((l) => (l.id === lineId ? { ...l, ingredientId: value } : l)),
-    );
-  }
-
-  onBomLotChange(lineId: string, event: Event): void {
-    const value = (event.target as HTMLInputElement).value;
-    this.bomLines.update((lines) =>
-      lines.map((l) => (l.id === lineId ? { ...l, lotBatchCode: value } : l)),
     );
   }
 
@@ -495,7 +475,6 @@ export class RecipesAdminComponent {
       {
         id: crypto.randomUUID(),
         ingredientId,
-        lotBatchCode: '',
         qty: 0,
       },
     ]);

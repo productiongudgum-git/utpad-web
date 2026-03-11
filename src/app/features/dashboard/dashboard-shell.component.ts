@@ -115,25 +115,21 @@ export class DashboardShellComponent {
   isDark = signal(false);
 
   navItems: NavItem[] = [
+    { label: 'Kanban Board', icon: 'view_kanban', route: 'kanban' },
     { label: 'Recipes', icon: 'science', route: 'recipes' },
-    { label: 'Inwarding', icon: 'input', route: 'inwarding' },
-    { label: 'Production', icon: 'precision_manufacturing', route: 'production' },
-    { label: 'Packing', icon: 'inventory_2', route: 'packing' },
-    { label: 'Dispatch', icon: 'local_shipping', route: 'dispatch' },
     { label: 'Inventory', icon: 'warehouse', route: 'inventory' },
     { label: 'Reports', icon: 'bar_chart', route: 'reports' },
-    { label: 'Kanban Board', icon: 'view_kanban', route: 'kanban' },
     { label: 'Traceability', icon: 'account_tree', route: 'traceability' },
     { label: 'Alerts', icon: 'notifications_active', route: 'alerts' },
     { label: 'Users', icon: 'group', route: 'users' },
   ];
 
   mobileNavItems: NavItem[] = [
-    { label: 'Production', icon: 'precision_manufacturing', route: 'production' },
+    { label: 'Kanban', icon: 'view_kanban', route: 'kanban' },
     { label: 'Inventory', icon: 'warehouse', route: 'inventory' },
-    { label: 'Dispatch', icon: 'local_shipping', route: 'dispatch' },
     { label: 'Alerts', icon: 'notifications_active', route: 'alerts' },
     { label: 'Reports', icon: 'bar_chart', route: 'reports' },
+    { label: 'Users', icon: 'group', route: 'users' },
   ];
 
   userName = () => this.authService.currentUser()?.name ?? 'User';
