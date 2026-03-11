@@ -326,6 +326,17 @@ export class OperationsLiveService {
     void this.updateWorkerCredentialsInBackend(workerId, phone, pin);
   }
 
+  deleteWorker(workerId: string): void {
+    const previousState = this._workers();
+    this._workers.update((w) => w.filter((xw) => xw.id !== workerId));
+
+    this.deleteWorkerInBackend(workerId).catch((err: Error) => {
+      console.error('Failed to delete worker', err);
+      this._workers.set(previousState);
+      throw err;
+    });
+  }
+
   async submitInwarding(input: InwardingSubmission): Promise<OperationEvent> {
     const worker = this.resolveWorker('inwarding');
     const request: SubmitOperationEventRequest = {
@@ -501,6 +512,18 @@ export class OperationsLiveService {
       });
     } catch {
       // Keep optimistic local state if backend write fails.
+    }
+  }
+
+  private async deleteWorkerInBackend(workerId: string): Promise<void> {
+    const res = await fetch(`${this.opsApiUrl}/workers/${encodeURIComponent(workerId)}`, {
+      method: 'DELETE',
+      headers: { 'X-Client-Platform': 'web' },
+    });
+    if (!res.ok && res.status !== 204) {
+      let message = 'Failed to delete worker';
+      try { const b = await res.json(); if (b.message) message = b.message; } catch { /* */ }
+      throw new Error(message);
     }
   }
 

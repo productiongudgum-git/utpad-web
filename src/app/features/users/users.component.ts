@@ -346,6 +346,19 @@ import { UserRole } from '../../shared/models/auth.models';
                     }
                   </div>
 
+                  <!-- ── DANGER ZONE ── -->
+                  <div class="mt-6 pt-4 border-t border-red-100">
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-red-400 mb-2">Danger Zone</p>
+                    <button
+                      type="button"
+                      (click)="confirmDeleteWorker(worker)"
+                      class="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-500 hover:bg-red-50 hover:border-red-300 transition">
+                      <span class="material-icons-round text-sm">delete</span>
+                      Delete Worker
+                    </button>
+                    <p class="mt-1.5 text-[10px] text-gray-400">This permanently removes the worker. Deactivate instead if they have past records.</p>
+                  </div>
+
                 </div>
               }
             }
@@ -578,6 +591,21 @@ export class UsersComponent {
     if (editPhone) this.revealPhoneId.set(workerId);
     if (editPin) this.revealPinId.set(workerId);
   }
+
+  confirmDeleteWorker(worker: WorkerCredential): void {
+    const confirmed = globalThis.confirm(
+      `Delete worker "${worker.name}"? This will deactivate access immediately.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    this.operations.setWorkerActive(worker.id, false);
+    this.expandedWorkerId.set(null);
+    this.credentialsEditId.set(null);
+    this.setStatus(`Worker "${worker.name}" deactivated.`, 'success');
+  }
+
 
   // --- Display helpers ---
   maskPhone(phone: string): string {
