@@ -120,7 +120,6 @@ export class DashboardShellComponent {
     { label: 'Traceability', icon: 'account_tree', route: 'traceability' },
     { label: 'Alerts', icon: 'notifications_active', route: 'alerts' },
     { label: 'Users', icon: 'group', route: 'users' },
-    { label: 'Sessions', icon: 'manage_accounts', route: 'sessions' },
   ];
 
   mobileNavItems: NavItem[] = [
