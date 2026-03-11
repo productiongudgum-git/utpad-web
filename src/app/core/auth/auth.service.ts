@@ -67,16 +67,58 @@ export class AuthService {
 
   loginWithEmail(email: string, password: string): Observable<LoginSuccessResponse> {
     this._isLoading.set(true);
-    return this.http.post<LoginSuccessResponse>(`${this.apiUrl}/login/email`, { email, password }).pipe(
-      tap((response) => {
-        this.handleLoginSuccess(response);
-        this._isLoading.set(false);
-      }),
-      catchError((err) => {
-        this._isLoading.set(false);
-        return throwError(() => err);
+
+    const supabaseUrl = environment.supabase.apiUrl;
+    const supabaseKey = environment.supabase.publishableKey;
+
+    return new Observable<LoginSuccessResponse>((observer) => {
+      fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+        },
+        body: JSON.stringify({ email, password }),
       })
-    );
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (status >= 400) {
+            const msg = data?.error_description || data?.msg || data?.message || 'Invalid email or password.';
+            const err: any = new Error(msg);
+            err.status = status === 400 ? 401 : status;
+            err.error = { message: msg };
+            this._isLoading.set(false);
+            observer.error(err);
+            return;
+          }
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const user = data.user;
+          const response: any = {
+            accessToken: data.access_token,
+            refreshToken: data.refresh_token,
+            expiresIn: data.expires_in || 3600,
+            user: {
+              userId: user.id,
+              tenantId: 'default-tenant',
+              name: user.user_metadata?.full_name || user.email,
+              email: user.email,
+              role: 'Admin',
+              factoryIds: ['factory-1'],
+              subscriptionTier: 'starter',
+            },
+          };
+          this.handleLoginSuccess(response);
+          this._isLoading.set(false);
+          observer.next(response);
+          observer.complete();
+        })
+        .catch((err) => {
+          this._isLoading.set(false);
+          observer.error(err);
+        });
+    });
   }
 
   loginWithPhone(phone: string, pin: string): Observable<LoginSuccessResponse> {

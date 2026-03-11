@@ -124,11 +124,14 @@ export class LoginComponent {
       error: (err) => {
         this.isLoading.set(false);
         if (err.status === 401 || err.status === 403) {
-          this.errorMessage.set('Invalid email or password.');
+          // Show real Supabase message (e.g. "Email not confirmed" or "Invalid credentials")
+          const msg = err.error?.message || err.message || 'Invalid email or password.';
+          this.errorMessage.set(msg);
         } else if (err.status === 429) {
           this.errorMessage.set('Too many requests. Please wait and try again.');
         } else {
-          this.errorMessage.set('Something went wrong. Please try again.');
+          const msg = err.error?.message || err.message || 'Something went wrong. Please try again.';
+          this.errorMessage.set(msg);
         }
       },
     });
