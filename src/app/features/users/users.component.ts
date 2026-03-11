@@ -53,7 +53,6 @@ import { UserRole } from '../../shared/models/auth.models';
                     formControlName="phone"
                     type="text"
                     inputmode="numeric"
-                    maxlength="10"
                     placeholder="9876543210"
                     (input)="onPhoneInput($event)"
                     class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 placeholder:text-gray-300" />
@@ -64,7 +63,6 @@ import { UserRole } from '../../shared/models/auth.models';
                     formControlName="pin"
                     type="password"
                     inputmode="numeric"
-                    maxlength="6"
                     placeholder="••••••"
                     (input)="onPinInput($event)"
                     class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 placeholder:text-gray-300" />
@@ -78,14 +76,11 @@ import { UserRole } from '../../shared/models/auth.models';
                   <select
                     formControlName="role"
                     (change)="onRoleChanged()"
-                    class="w-full appearance-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 pr-10 text-sm text-gray-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100">
+                    class="dropdown-with-arrow w-full appearance-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 pr-10 text-sm text-gray-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100">
                     @for (role of roleOptions; track role) {
                       <option [value]="role">{{ formatRole(role) }}</option>
                     }
                   </select>
-                  <svg class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                    <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-                  </svg>
                 </div>
               </div>
 
@@ -157,7 +152,9 @@ import { UserRole } from '../../shared/models/auth.models';
             }
 
             @for (worker of visibleWorkers(); track worker.id) {
-              <div class="group px-6 py-4 flex items-center gap-4 hover:bg-gray-50 transition-colors">
+              <div 
+                class="group px-6 py-4 flex items-center gap-4 hover:bg-gray-50 transition-colors cursor-pointer"
+                (click)="toggleWorkerCard(worker.id)">
 
                 <!-- Avatar -->
                 <div
@@ -197,18 +194,17 @@ import { UserRole } from '../../shared/models/auth.models';
                   <!-- Toggle active button -->
                   <button
                     type="button"
-                    (click)="toggleWorkerActive(worker)"
+                    (click)="toggleWorkerActive(worker); $event.stopPropagation()"
                     class="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-indigo-600 transition"
                     [title]="worker.active ? 'Deactivate' : 'Activate'">
                     <span class="material-icons-round text-base">{{ worker.active ? 'toggle_on' : 'toggle_off' }}</span>
                   </button>
-                  <!-- Expand panel button -->
+                  <!-- Expand panel arrow (optional, indicating it's clickable) -->
                   <button
                     type="button"
-                    (click)="toggleWorkerCard(worker.id)"
-                    class="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-indigo-600 transition"
-                    title="Edit credentials & modules">
-                    <span class="material-icons-round text-base">more_vert</span>
+                    class="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 transition pointer-events-none"
+                    [title]="expandedWorkerId() === worker.id ? 'Collapse' : 'Expand'">
+                    <span class="material-icons-round text-base">{{ expandedWorkerId() === worker.id ? 'expand_less' : 'expand_more' }}</span>
                   </button>
                 </div>
               </div>
@@ -290,7 +286,6 @@ import { UserRole } from '../../shared/models/auth.models';
                             formControlName="editPhone"
                             type="text"
                             inputmode="numeric"
-                            maxlength="10"
                             placeholder="Leave blank to keep"
                             (input)="onEditPhoneInput($event)"
                             class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 placeholder:text-gray-300" />
@@ -303,7 +298,6 @@ import { UserRole } from '../../shared/models/auth.models';
                               formControlName="editPin"
                               [type]="showNewPin() ? 'text' : 'password'"
                               inputmode="numeric"
-                              maxlength="6"
                               placeholder="Leave blank to keep"
                               (input)="onEditPinInput($event)"
                               class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 pr-9 text-sm text-gray-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 placeholder:text-gray-300" />
@@ -435,14 +429,14 @@ export class UsersComponent {
 
   readonly credentialForm = this.fb.nonNullable.group({
     name: ['', Validators.required],
-    phone: ['', [Validators.required, Validators.pattern('^[0-9]{10}$')]],
-    pin: ['', [Validators.required, Validators.pattern('^[0-9]{6}$')]],
+    phone: ['', Validators.required],
+    pin: ['', Validators.required],
     role: [UserRole.InwardingStaff, Validators.required],
   });
 
   readonly editCredentialsForm = this.fb.nonNullable.group({
-    editPhone: ['', Validators.pattern('^[0-9]{10}$')],
-    editPin: ['', Validators.pattern('^[0-9]{4,6}$')],
+    editPhone: [''],
+    editPin: [''],
   });
 
   nextPage(): void { if (this.canNext()) this.currentPage.update(p => p + 1); }
@@ -455,26 +449,22 @@ export class UsersComponent {
 
   onPhoneInput(event: Event): void {
     const input = event.target as HTMLInputElement;
-    const digits = input.value.replace(/\D/g, '').slice(0, 10);
-    this.credentialForm.controls.phone.setValue(digits, { emitEvent: false });
+    this.credentialForm.controls.phone.setValue(input.value, { emitEvent: false });
   }
 
   onPinInput(event: Event): void {
     const input = event.target as HTMLInputElement;
-    const digits = input.value.replace(/\D/g, '').slice(0, 6);
-    this.credentialForm.controls.pin.setValue(digits, { emitEvent: false });
+    this.credentialForm.controls.pin.setValue(input.value, { emitEvent: false });
   }
 
   onEditPhoneInput(event: Event): void {
     const input = event.target as HTMLInputElement;
-    const digits = input.value.replace(/\D/g, '').slice(0, 10);
-    this.editCredentialsForm.controls.editPhone.setValue(digits, { emitEvent: false });
+    this.editCredentialsForm.controls.editPhone.setValue(input.value, { emitEvent: false });
   }
 
   onEditPinInput(event: Event): void {
     const input = event.target as HTMLInputElement;
-    const digits = input.value.replace(/\D/g, '').slice(0, 6);
-    this.editCredentialsForm.controls.editPin.setValue(digits, { emitEvent: false });
+    this.editCredentialsForm.controls.editPin.setValue(input.value, { emitEvent: false });
   }
 
   toggleCreateModule(module: WorkerModule): void {
@@ -496,10 +486,17 @@ export class UsersComponent {
     }
 
     const values = this.credentialForm.getRawValue();
+    const phone = values.phone.trim();
+    const pin = values.pin.trim();
+    if (!phone || !pin) {
+      this.setStatus('Phone and PIN cannot be empty.', 'error');
+      return;
+    }
+
     const created = this.operations.createWorkerCredential({
       name: values.name.trim(),
-      phone: values.phone,
-      pin: values.pin,
+      phone,
+      pin,
       role: values.role,
       allowedModules: this.selectedModules(),
     });
