@@ -128,6 +128,8 @@ import { UserRole } from '../../shared/models/auth.models';
               </div>
             }
         </div>
+        <!-- /TOP: New Credential Form -->
+        </div>
 
         <!-- Active Workers Table (full width, below form) -->
         <div class="w-full bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
