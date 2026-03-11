@@ -14,11 +14,7 @@ describe('AppComponent', () => {
     expect(app).toBeTruthy();
   });
 
-  it(`should have the 'utpad-web' title`, () => {
-    const fixture = TestBed.createComponent(AppComponent);
-    const app = fixture.componentInstance;
-    expect(app.title).toEqual('utpad-web');
-  });
+  // Title test removed because the app component no longer has this property
 
   it('should render title', () => {
     const fixture = TestBed.createComponent(AppComponent);
