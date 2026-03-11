@@ -332,7 +332,7 @@ export class UsersComponent implements OnInit {
       .insert({
         name: name.trim(),
         phone: phone.trim(),
-        pin_hash: pin.trim(), // hashing deferred to backend trigger or Supabase function
+        pin: pin.trim(),
         worker_role: role,
         active: true,
       })
