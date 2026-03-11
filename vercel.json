@@ -1,4 +1,6 @@
 {
+    "buildCommand": "npm run build",
+    "outputDirectory": "dist/utpad-web/browser",
     "rewrites": [
         {
             "source": "/api/(.*)",
