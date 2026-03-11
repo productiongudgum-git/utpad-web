@@ -1,4 +1,4 @@
-﻿import { CommonModule, TitleCasePipe } from '@angular/common';
+import { CommonModule, DatePipe, TitleCasePipe } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { OperationsLiveService, WorkerCredential, WorkerModule } from '../../core/services/operations-live.service';
@@ -7,196 +7,269 @@ import { UserRole } from '../../shared/models/auth.models';
 @Component({
   selector: 'app-users',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, TitleCasePipe],
+  imports: [CommonModule, ReactiveFormsModule, TitleCasePipe, DatePipe],
   template: `
-    <section class="mx-auto flex w-full max-w-6xl flex-col items-center gap-6 px-4 py-5 sm:px-6 lg:px-8">
-      <header class="w-full max-w-3xl rounded-2xl border border-border-light bg-surface-light px-4 py-3 shadow-sm dark:border-border-dark dark:bg-surface-dark">
-        <div class="flex items-center justify-between gap-3">
-          <button type="button" class="rounded-full p-2 text-text-sub-light transition hover:bg-black/5 dark:text-text-sub-dark dark:hover:bg-white/10" aria-label="Back">
-            <span class="material-icons-round text-[20px]">arrow_back</span>
-          </button>
+    <section class="min-h-full px-6 py-8" style="background:#f1f3f6;">
 
-          <div class="flex-1 text-center">
-            <h1 class="text-xl font-bold tracking-tight text-text-main-light dark:text-text-main-dark">Worker Credentials</h1>
-            <p class="text-xs text-text-sub-light dark:text-text-sub-dark">Manage manufacturing staff access</p>
+      <!-- Page Header -->
+      <div class="mb-8">
+        <p class="text-xs font-bold uppercase tracking-widest mb-1" style="color:#5b6bff;">ACCESS MANAGEMENT</p>
+        <h1 class="text-3xl font-bold text-gray-900 leading-tight">Worker Credentials</h1>
+        <p class="mt-1 text-sm text-gray-500 max-w-xl">Issue, audit, and revoke worker access credentials with high-precision control across your infrastructure.</p>
+      </div>
+
+      <!-- Two-column layout -->
+      <div class="flex gap-6 items-start">
+
+        <!-- LEFT COLUMN: New Credential Form -->
+        <div class="flex-shrink-0 w-[360px] space-y-4">
+
+          <!-- Form Card -->
+          <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+            <!-- Card header -->
+            <div class="flex items-center gap-2 mb-5">
+              <div class="w-7 h-7 rounded-full flex items-center justify-center" style="background:#5b6bff;">
+                <span class="material-icons-round text-white text-sm">security</span>
+              </div>
+              <h2 class="font-semibold text-gray-800 text-base">New Credential</h2>
+            </div>
+
+            <form [formGroup]="credentialForm" (ngSubmit)="createCredential()" class="space-y-4">
+
+              <!-- Worker Name -->
+              <div>
+                <label class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">Worker Name</label>
+                <input
+                  formControlName="name"
+                  type="text"
+                  placeholder="Johnathan Doe"
+                  class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 placeholder:text-gray-300" />
+              </div>
+
+              <!-- Phone + PIN -->
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">Phone</label>
+                  <input
+                    formControlName="phone"
+                    type="text"
+                    inputmode="numeric"
+                    maxlength="10"
+                    placeholder="9876543210"
+                    (input)="onPhoneInput($event)"
+                    class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 placeholder:text-gray-300" />
+                </div>
+                <div>
+                  <label class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">PIN</label>
+                  <input
+                    formControlName="pin"
+                    type="password"
+                    inputmode="numeric"
+                    maxlength="6"
+                    placeholder="••••••"
+                    (input)="onPinInput($event)"
+                    class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 placeholder:text-gray-300" />
+                </div>
+              </div>
+
+              <!-- Access Level (Role) + Expiration layout -->
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">Access Level</label>
+                  <div class="relative">
+                    <select
+                      formControlName="role"
+                      (change)="onRoleChanged()"
+                      class="w-full appearance-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 pr-8 text-sm text-gray-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100">
+                      @for (role of roleOptions; track role) {
+                        <option [value]="role">{{ formatRole(role) }}</option>
+                      }
+                    </select>
+                    <span class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 material-icons-round text-gray-400 text-base">expand_more</span>
+                  </div>
+                </div>
+                <div>
+                  <label class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">Created</label>
+                  <div class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-400">
+                    {{ today | date:'MM/dd/yyyy' }}
+                  </div>
+                </div>
+              </div>
+
+              <!-- Module Access (Department) -->
+              <div>
+                <label class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">Module Access</label>
+                <div class="flex flex-wrap gap-2">
+                  @for (module of moduleOptions; track module) {
+                    <button
+                      type="button"
+                      (click)="toggleCreateModule(module)"
+                      class="rounded-full border px-3.5 py-1.5 text-xs font-semibold transition"
+                      [class]="selectedModules().includes(module)
+                        ? 'border-indigo-500 bg-indigo-50 text-indigo-600'
+                        : 'border-gray-200 bg-white text-gray-500 hover:border-indigo-300 hover:text-indigo-500'">
+                      {{ module | titlecase }}
+                    </button>
+                  }
+                </div>
+              </div>
+
+              <!-- Submit -->
+              <button
+                type="submit"
+                [disabled]="credentialForm.invalid || selectedModules().length === 0"
+                class="w-full flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white transition hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                style="background: linear-gradient(135deg, #5b6bff, #7b3fe4);">
+                <span class="material-icons-round text-base">key</span>
+                Generate Credential
+              </button>
+            </form>
+
+            @if (statusMessage()) {
+              <div
+                class="mt-3 rounded-lg border px-4 py-2.5 text-xs font-medium text-center"
+                [class]="statusKind() === 'success'
+                  ? 'border-green-200 bg-green-50 text-green-700'
+                  : 'border-red-200 bg-red-50 text-red-700'">
+                {{ statusMessage() }}
+              </div>
+            }
           </div>
 
-          <button type="button" class="rounded-full p-2 text-primary transition hover:bg-primary/10" aria-label="Info">
-            <span class="material-icons-round text-[20px]">info</span>
-          </button>
+          <!-- Info note -->
+          <div class="flex gap-3 rounded-2xl border border-dashed border-gray-300 bg-white/70 px-4 py-3.5">
+            <span class="material-icons-round text-indigo-400 text-lg mt-0.5 flex-shrink-0">info</span>
+            <p class="text-xs text-gray-500 leading-relaxed">Generated credentials use AES-256 encryption. Ensure the worker receives their token via a secure channel as it will only be displayed once.</p>
+          </div>
         </div>
-      </header>
 
-      <div class="grid w-full max-w-6xl gap-6 lg:grid-cols-[minmax(360px,480px)_minmax(380px,1fr)] lg:items-start">
-        <article class="mx-auto w-full max-w-xl rounded-2xl border border-border-light bg-surface-light p-4 shadow-sm dark:border-border-dark dark:bg-surface-dark">
-          <p class="text-center text-xs font-semibold uppercase tracking-[0.16em] text-primary">New Credential</p>
+        <!-- RIGHT COLUMN: Active Workers Table -->
+        <div class="flex-1 bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
 
-          <form [formGroup]="credentialForm" (ngSubmit)="createCredential()" class="mt-4 space-y-4">
-            <div class="space-y-1.5">
-              <label class="block text-center text-xs font-medium uppercase tracking-wider text-text-sub-light dark:text-text-sub-dark">Full Name</label>
-              <input
-                formControlName="name"
-                type="text"
-                placeholder="e.g. Rahul Sharma"
-                class="h-12 w-full rounded-xl border border-border-light bg-[#f8f8f8] px-3 text-center text-sm text-text-main-light outline-none transition focus:border-primary dark:border-border-dark dark:bg-[#20232f] dark:text-text-main-dark" />
+          <!-- Table header -->
+          <div class="px-6 py-4 flex items-center justify-between border-b border-gray-100">
+            <div class="flex items-center gap-3">
+              <h2 class="text-base font-bold text-gray-900">Active Workers</h2>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-indigo-100 text-indigo-600">
+                {{ workers().length }} TOTAL
+              </span>
             </div>
-
-            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div class="space-y-1.5">
-                <label class="block text-center text-xs font-medium uppercase tracking-wider text-text-sub-light dark:text-text-sub-dark">Phone Number</label>
-                <input
-                  formControlName="phone"
-                  type="text"
-                  inputmode="numeric"
-                  maxlength="10"
-                  placeholder="9876543210"
-                  (input)="onPhoneInput($event)"
-                  class="h-12 w-full rounded-xl border border-border-light bg-[#f8f8f8] px-3 text-center text-sm tracking-[0.08em] text-text-main-light outline-none transition focus:border-primary dark:border-border-dark dark:bg-[#20232f] dark:text-text-main-dark" />
-              </div>
-
-              <div class="space-y-1.5">
-                <label class="block text-center text-xs font-medium uppercase tracking-wider text-text-sub-light dark:text-text-sub-dark">6-Digit PIN</label>
-                <input
-                  formControlName="pin"
-                  type="text"
-                  inputmode="numeric"
-                  maxlength="6"
-                  placeholder="••••••"
-                  (input)="onPinInput($event)"
-                  class="h-12 w-full rounded-xl border border-border-light bg-[#f8f8f8] px-3 text-center text-sm tracking-[0.22em] text-text-main-light outline-none transition focus:border-primary dark:border-border-dark dark:bg-[#20232f] dark:text-text-main-dark" />
-              </div>
-            </div>
-
-            <div class="space-y-1.5">
-              <label class="block text-center text-xs font-medium uppercase tracking-wider text-text-sub-light dark:text-text-sub-dark">Primary Role</label>
-              <select
-                formControlName="role"
-                (change)="onRoleChanged()"
-                class="h-12 w-full rounded-xl border border-border-light bg-[#f8f8f8] px-3 text-center text-sm text-text-main-light outline-none transition focus:border-primary dark:border-border-dark dark:bg-[#20232f] dark:text-text-main-dark">
-                @for (role of roleOptions; track role) {
-                  <option [value]="role">{{ formatRole(role) }}</option>
-                }
-              </select>
-            </div>
-
-            <div class="space-y-2">
-              <label class="block text-center text-xs font-medium uppercase tracking-wider text-text-sub-light dark:text-text-sub-dark">Module Access</label>
-              <div class="flex flex-wrap justify-center gap-2">
-                @for (module of moduleOptions; track module) {
-                  <button
-                    type="button"
-                    (click)="toggleCreateModule(module)"
-                    class="rounded-full border px-3 py-1.5 text-xs font-semibold transition"
-                    [ngClass]="selectedModules().includes(module)
-                      ? 'border-primary bg-primary text-white'
-                      : 'border-border-light bg-white text-text-sub-light hover:border-primary/40 hover:text-primary dark:border-border-dark dark:bg-transparent dark:text-text-sub-dark'">
-                    {{ module | titlecase }}
-                  </button>
-                }
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              [disabled]="credentialForm.invalid || selectedModules().length === 0"
-              class="mx-auto flex h-12 w-full max-w-sm items-center justify-center gap-2 rounded-xl bg-primary px-4 font-semibold text-white shadow-lg shadow-primary/25 transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50">
-              <span class="material-icons-round text-[18px]">person_add</span>
-              Create Credential
-            </button>
-          </form>
-
-          @if (statusMessage()) {
-            <div
-              class="mx-auto mt-3 max-w-sm rounded-xl border px-3 py-2 text-center text-xs font-medium"
-              [ngClass]="statusKind() === 'success'
-                ? 'border-green-200 bg-green-50 text-green-700 dark:border-green-900/40 dark:bg-green-900/15 dark:text-green-300'
-                : 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/40 dark:bg-red-900/15 dark:text-red-300'">
-              {{ statusMessage() }}
-            </div>
-          }
-        </article>
-
-        <article class="mx-auto flex w-full max-w-2xl flex-col items-center space-y-3">
-          <div class="flex w-full max-w-xl items-center justify-between">
-            <h2 class="text-center text-xl font-bold text-text-main-light dark:text-text-main-dark">
-              Active Workers <span class="text-text-sub-light dark:text-text-sub-dark">({{ activeWorkerCount() }})</span>
-            </h2>
-            <button type="button" (click)="toggleShowAllWorkers()" class="text-sm font-semibold text-primary transition hover:text-primary-hover">
-              {{ showAllWorkers() ? 'Show Less' : 'View All' }}
+            <button type="button" class="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-indigo-600 transition">
+              <span class="material-icons-round text-sm">filter_list</span>
+              Filter
             </button>
           </div>
 
-          <div class="w-full max-w-xl space-y-2.5">
+          <!-- Worker rows -->
+          <div class="divide-y divide-gray-50">
             @if (visibleWorkers().length === 0) {
-              <div class="rounded-xl border border-dashed border-border-light bg-surface-light p-4 text-center text-sm text-text-sub-light dark:border-border-dark dark:bg-surface-dark dark:text-text-sub-dark">
-                No workers found yet.
+              <div class="px-6 py-12 text-center text-sm text-gray-400">
+                No workers created yet. Use the form to add your first worker.
               </div>
             }
 
             @for (worker of visibleWorkers(); track worker.id) {
-              <article class="rounded-xl border border-border-light bg-surface-light px-3 py-3 shadow-sm transition dark:border-border-dark dark:bg-surface-dark">
-                <div class="flex items-center justify-between gap-3">
+              <div class="group px-6 py-4 flex items-center gap-4 hover:bg-gray-50 transition-colors">
+
+                <!-- Avatar -->
+                <div
+                  class="w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+                  [class]="worker.active
+                    ? 'bg-indigo-100 text-indigo-600'
+                    : 'bg-gray-100 text-gray-400'">
+                  {{ workerInitials(worker.name) }}
+                </div>
+
+                <!-- Name + Role -->
+                <div class="flex-1 min-w-0">
+                  <p
+                    class="text-sm font-semibold leading-tight"
+                    [class]="worker.active ? 'text-gray-900' : 'text-gray-400 line-through'">
+                    {{ worker.name }}
+                  </p>
+                  <p class="text-xs text-gray-400 mt-0.5 truncate">
+                    {{ formatRole(worker.role) }} · {{ moduleLabel(worker.allowedModules) }}
+                  </p>
+                </div>
+
+                <!-- Status + Date -->
+                <div class="text-right flex-shrink-0 ml-auto">
+                  <p
+                    class="text-[11px] font-bold uppercase tracking-wider"
+                    [class]="statusColor(worker)">
+                    ● {{ statusLabel(worker) }}
+                  </p>
+                  <p class="text-[10px] text-gray-400 mt-0.5">
+                    {{ worker.createdAt | date:'MMM d, yyyy' }}
+                  </p>
+                </div>
+
+                <!-- Actions menu -->
+                <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <!-- Toggle active button -->
+                  <button
+                    type="button"
+                    (click)="toggleWorkerActive(worker)"
+                    class="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-indigo-600 transition"
+                    [title]="worker.active ? 'Deactivate' : 'Activate'">
+                    <span class="material-icons-round text-base">{{ worker.active ? 'toggle_on' : 'toggle_off' }}</span>
+                  </button>
+                  <!-- Expand modules button -->
                   <button
                     type="button"
                     (click)="toggleWorkerCard(worker.id)"
-                    class="flex min-w-0 flex-1 items-center gap-3 text-left">
-                    <div
-                      class="flex size-10 shrink-0 items-center justify-center rounded-full text-xs font-bold"
-                      [ngClass]="worker.active
-                        ? 'bg-primary/15 text-primary'
-                        : 'bg-gray-200 text-gray-500 dark:bg-gray-700 dark:text-gray-300'">
-                      {{ workerInitials(worker.name) }}
-                    </div>
-
-                    <div class="min-w-0 flex-1">
-                      <p class="truncate text-sm font-semibold text-text-main-light dark:text-text-main-dark">{{ worker.name }}</p>
-                      <p class="truncate text-[11px] uppercase tracking-[0.08em] text-text-sub-light dark:text-text-sub-dark">
-                        {{ formatRole(worker.role) }} · {{ worker.phone }} · {{ worker.pin }}
-                      </p>
-                    </div>
+                    class="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-indigo-600 transition">
+                    <span class="material-icons-round text-base">more_vert</span>
                   </button>
+                </div>
+              </div>
 
-                  <div class="flex items-center gap-2">
-                    <button
-                      type="button"
-                      (click)="toggleWorkerActive(worker)"
-                      class="rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wider"
-                      [ngClass]="worker.active
-                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                        : 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300'">
-                      {{ worker.active ? 'On' : 'Off' }}
-                    </button>
-
-                    <button type="button" (click)="toggleWorkerCard(worker.id)" class="rounded-full p-1 text-text-sub-light transition hover:bg-black/5 dark:text-text-sub-dark dark:hover:bg-white/10">
-                      <span class="material-icons-round text-[18px]">
-                        {{ expandedWorkerId() === worker.id ? 'expand_less' : 'chevron_right' }}
-                      </span>
-                    </button>
+              <!-- Module access editor (expanded) -->
+              @if (expandedWorkerId() === worker.id) {
+                <div class="px-6 pb-4 bg-indigo-50/40 border-t border-indigo-100">
+                  <p class="text-[10px] font-bold uppercase tracking-widest text-indigo-400 pt-3 mb-2">Module Access</p>
+                  <div class="flex flex-wrap gap-2">
+                    @for (module of moduleOptions; track module) {
+                      <button
+                        type="button"
+                        (click)="toggleWorkerModule(worker, module)"
+                        class="rounded-full border px-4 py-1.5 text-xs font-semibold transition"
+                        [class]="worker.allowedModules.includes(module)
+                          ? 'border-indigo-500 bg-indigo-600 text-white'
+                          : 'border-gray-200 bg-white text-gray-500 hover:border-indigo-400 hover:text-indigo-500'">
+                        {{ module | titlecase }}
+                      </button>
+                    }
                   </div>
                 </div>
-
-                @if (expandedWorkerId() === worker.id) {
-                  <div class="mt-3 border-t border-border-light pt-3 dark:border-border-dark">
-                    <p class="mb-2 text-center text-[11px] font-semibold uppercase tracking-[0.09em] text-text-sub-light dark:text-text-sub-dark">Module Access</p>
-                    <div class="flex flex-wrap justify-center gap-2">
-                      @for (module of moduleOptions; track module) {
-                        <button
-                          type="button"
-                          (click)="toggleWorkerModule(worker, module)"
-                          class="rounded-full border px-3 py-1.5 text-xs font-semibold transition"
-                          [ngClass]="worker.allowedModules.includes(module)
-                            ? 'border-primary bg-primary/12 text-primary'
-                            : 'border-border-light text-text-sub-light hover:border-primary/50 hover:text-primary dark:border-border-dark dark:text-text-sub-dark'">
-                          {{ module | titlecase }}
-                        </button>
-                      }
-                    </div>
-                  </div>
-                }
-              </article>
+              }
             }
           </div>
-        </article>
+
+          <!-- Table footer -->
+          <div class="px-6 py-3 border-t border-gray-100 flex items-center justify-between">
+            <p class="text-xs text-gray-400">
+              Showing 1 to {{ visibleWorkers().length }} of {{ workers().length }}
+            </p>
+            <div class="flex items-center gap-1">
+              <button
+                type="button"
+                (click)="prevPage()"
+                [disabled]="!canPrev()"
+                class="w-7 h-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:border-indigo-300 hover:text-indigo-600 disabled:opacity-30 disabled:cursor-not-allowed transition">
+                <span class="material-icons-round text-sm">chevron_left</span>
+              </button>
+              <button
+                type="button"
+                (click)="nextPage()"
+                [disabled]="!canNext()"
+                class="w-7 h-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:border-indigo-300 hover:text-indigo-600 disabled:opacity-30 disabled:cursor-not-allowed transition">
+                <span class="material-icons-round text-sm">chevron_right</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
       </div>
     </section>
   `,
@@ -209,7 +282,9 @@ export class UsersComponent {
   readonly statusMessage = signal('');
   readonly statusKind = signal<'success' | 'error'>('success');
   readonly expandedWorkerId = signal<string | null>(null);
-  readonly showAllWorkers = signal(false);
+  readonly currentPage = signal(0);
+  readonly pageSize = 6;
+  readonly today = new Date();
 
   readonly moduleOptions: WorkerModule[] = ['inwarding', 'production', 'packing', 'dispatch'];
   readonly roleOptions: UserRole[] = [
@@ -222,18 +297,22 @@ export class UsersComponent {
 
   readonly selectedModules = signal<WorkerModule[]>(['inwarding']);
 
-  readonly activeWorkerCount = computed(() => this.workers().filter((worker) => worker.active).length);
+  readonly sortedWorkers = computed(() =>
+    [...this.workers()].sort((a, b) => {
+      if (a.active !== b.active) return a.active ? -1 : 1;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    })
+  );
 
   readonly visibleWorkers = computed(() => {
-    const ordered = [...this.workers()].sort((a, b) => {
-      if (a.active !== b.active) {
-        return a.active ? -1 : 1;
-      }
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
-
-    return this.showAllWorkers() ? ordered : ordered.slice(0, 6);
+    const start = this.currentPage() * this.pageSize;
+    return this.sortedWorkers().slice(start, start + this.pageSize);
   });
+
+  readonly canNext = computed(() =>
+    (this.currentPage() + 1) * this.pageSize < this.sortedWorkers().length
+  );
+  readonly canPrev = computed(() => this.currentPage() > 0);
 
   readonly credentialForm = this.fb.nonNullable.group({
     name: ['', Validators.required],
@@ -241,6 +320,9 @@ export class UsersComponent {
     pin: ['', [Validators.required, Validators.pattern('^[0-9]{6}$')]],
     role: [UserRole.InwardingStaff, Validators.required],
   });
+
+  nextPage(): void { if (this.canNext()) this.currentPage.update(p => p + 1); }
+  prevPage(): void { if (this.canPrev()) this.currentPage.update(p => p - 1); }
 
   onRoleChanged(): void {
     const role = this.credentialForm.controls.role.value;
@@ -272,7 +354,6 @@ export class UsersComponent {
       this.setStatus('Please complete all fields with valid values.', 'error');
       return;
     }
-
     if (this.selectedModules().length === 0) {
       this.setStatus('Select at least one module access.', 'error');
       return;
@@ -287,17 +368,13 @@ export class UsersComponent {
       allowedModules: this.selectedModules(),
     });
 
-    const granted = created.allowedModules.map((module) => this.prettyModule(module)).join(', ');
+    const granted = created.allowedModules.map((m) => this.prettyModule(m)).join(', ');
     this.setStatus(`Credential created for ${created.name}. Access: ${granted}.`, 'success');
 
-    this.credentialForm.reset({
-      name: '',
-      phone: '',
-      pin: '',
-      role: UserRole.InwardingStaff,
-    });
+    this.credentialForm.reset({ name: '', phone: '', pin: '', role: UserRole.InwardingStaff });
     this.selectedModules.set(['inwarding']);
     this.expandedWorkerId.set(created.id);
+    this.currentPage.set(0);
   }
 
   toggleWorkerCard(workerId: string): void {
@@ -317,12 +394,7 @@ export class UsersComponent {
       this.setStatus('At least one module must remain assigned.', 'error');
       return;
     }
-
     this.operations.updateWorkerAccess(worker.id, nextModules);
-  }
-
-  toggleShowAllWorkers(): void {
-    this.showAllWorkers.update((state) => !state);
   }
 
   workerInitials(name: string): string {
@@ -334,6 +406,27 @@ export class UsersComponent {
       .join('') || 'WK';
   }
 
+  moduleLabel(modules: WorkerModule[]): string {
+    if (modules.length === 0) return 'No modules';
+    if (modules.length === 1) return modules[0].charAt(0).toUpperCase() + modules[0].slice(1);
+    return modules.map(m => m.charAt(0).toUpperCase() + m.slice(1)).join(', ');
+  }
+
+  statusLabel(worker: WorkerCredential): string {
+    if (!worker.active) return 'Revoked';
+    const lastActive = new Date(worker.createdAt).getTime();
+    const age = Date.now() - lastActive;
+    if (age > 30 * 24 * 60 * 60 * 1000) return 'Reviewing';
+    return 'Active';
+  }
+
+  statusColor(worker: WorkerCredential): string {
+    const label = this.statusLabel(worker);
+    if (label === 'Active') return 'text-green-600';
+    if (label === 'Reviewing') return 'text-amber-500';
+    return 'text-red-400';
+  }
+
   formatRole(role: string): string {
     return role.replaceAll('_', ' ');
   }
@@ -341,24 +434,20 @@ export class UsersComponent {
   private setStatus(message: string, kind: 'success' | 'error'): void {
     this.statusKind.set(kind);
     this.statusMessage.set(message);
+    setTimeout(() => this.statusMessage.set(''), 5000);
   }
 
   private defaultModulesForRole(role: UserRole): WorkerModule[] {
     switch (role) {
-      case UserRole.InwardingStaff:
-        return ['inwarding'];
-      case UserRole.ProductionOperator:
-        return ['production'];
-      case UserRole.PackingStaff:
-        return ['packing'];
-      case UserRole.DispatchStaff:
-        return ['dispatch'];
+      case UserRole.InwardingStaff: return ['inwarding'];
+      case UserRole.ProductionOperator: return ['production'];
+      case UserRole.PackingStaff: return ['packing'];
+      case UserRole.DispatchStaff: return ['dispatch'];
       case UserRole.FactorySupervisor:
       case UserRole.TenantAdmin:
       case UserRole.PlatformAdmin:
         return ['inwarding', 'production', 'packing', 'dispatch'];
-      default:
-        return ['inwarding'];
+      default: return ['inwarding'];
     }
   }
 
