@@ -5,6 +5,7 @@ import { Observable, tap, catchError, throwError, BehaviorSubject } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
 import { TokenService } from './token.service';
+import { SupabaseService } from '../supabase.service';
 import {
   User,
   LoginEmailRequest,
@@ -37,6 +38,7 @@ import {
 export class AuthService {
   private readonly http = inject(HttpClient);
   private readonly tokenService = inject(TokenService);
+  private readonly supabaseService = inject(SupabaseService);
   private readonly router = inject(Router);
   private readonly apiUrl = `${environment.apiBaseUrl}/auth`;
 
@@ -291,6 +293,11 @@ export class AuthService {
 
   private handleLoginSuccess(response: LoginSuccessResponse): void {
     this.tokenService.setTokens(response.accessToken, response.refreshToken);
+    // Sync JWT to the Supabase JS client so RLS policies see the authenticated role.
+    void this.supabaseService.client.auth.setSession({
+      access_token: response.accessToken,
+      refresh_token: response.refreshToken,
+    });
     this._currentUser.set(response.user);
     this.resetInactivityTimer();
     this.fetchPermissions().subscribe();
@@ -298,6 +305,7 @@ export class AuthService {
 
   private clearSession(): void {
     this.tokenService.clearTokens();
+    void this.supabaseService.client.auth.signOut();
     this._currentUser.set(null);
     this._permissions.set([]);
     if (this._inactivityTimer) {
