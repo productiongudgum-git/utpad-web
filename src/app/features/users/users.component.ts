@@ -74,16 +74,16 @@ const ALL_MODULES: WorkerModule[] = ['inwarding', 'production', 'packing', 'disp
 
               <!-- PIN -->
               <div>
-                <label class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">PIN (4 digits) *</label>
+                <label class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">PIN (6 digits) *</label>
                 <input
                   formControlName="pin"
                   type="password"
                   inputmode="numeric"
-                  placeholder="••••"
-                  maxlength="4"
+                  placeholder="••••••"
+                  maxlength="6"
                   class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 placeholder:text-gray-300" />
                 @if (workerForm.controls.pin.invalid && workerForm.controls.pin.touched) {
-                  <p class="text-xs text-red-500 mt-1">Must be exactly 4 digits.</p>
+                  <p class="text-xs text-red-500 mt-1">Must be exactly 6 digits.</p>
                 }
               </div>
 
@@ -147,7 +147,9 @@ const ALL_MODULES: WorkerModule[] = ['inwarding', 'production', 'packing', 'disp
           } @else {
             <div class="divide-y divide-gray-50">
               @for (worker of visibleWorkers(); track worker.worker_id) {
-                <div class="group px-6 py-4 flex items-center gap-4 hover:bg-gray-50 transition-colors">
+                <div
+                  class="group px-6 py-4 flex items-center gap-4 hover:bg-gray-50 transition-colors cursor-pointer"
+                  (click)="openWorkerDetail(worker)">
 
                   <!-- Avatar -->
                   <div
@@ -163,7 +165,7 @@ const ALL_MODULES: WorkerModule[] = ['inwarding', 'production', 'packing', 'disp
                       {{ worker.name }}
                     </p>
                     <p class="text-xs text-gray-400 mt-0.5">
-                      {{ worker.worker_role | titlecase }} · {{ worker.phone ?? 'No phone' }}
+                      {{ worker.phone ?? 'No phone' }}
                     </p>
                     <div class="flex flex-wrap gap-1 mt-1">
                       @for (mod of worker.modules; track mod) {
@@ -183,15 +185,9 @@ const ALL_MODULES: WorkerModule[] = ['inwarding', 'production', 'packing', 'disp
                     <p class="text-[10px] text-gray-400 mt-0.5">{{ worker.created_at | date:'MMM d, yyyy' }}</p>
                   </div>
 
-                  <!-- Actions -->
-                  <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      type="button"
-                      (click)="toggleWorkerActive(worker)"
-                      [title]="worker.active ? 'Deactivate worker' : 'Activate worker'"
-                      class="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-indigo-600 transition">
-                      <span class="material-icons-round text-base">{{ worker.active ? 'toggle_on' : 'toggle_off' }}</span>
-                    </button>
+                  <!-- Edit hint -->
+                  <div class="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span class="material-icons-round text-gray-300 text-base">chevron_right</span>
                   </div>
                 </div>
               }
@@ -218,6 +214,160 @@ const ALL_MODULES: WorkerModule[] = ['inwarding', 'production', 'packing', 'disp
 
       </div>
     </section>
+
+    <!-- ── Worker Detail Drawer ───────────────────────────────── -->
+    @if (selectedWorker()) {
+      <!-- Backdrop -->
+      <div
+        class="fixed inset-0 bg-black/30 z-40 transition-opacity"
+        (click)="closeDrawer()">
+      </div>
+
+      <!-- Drawer panel -->
+      <div class="fixed top-0 right-0 h-full w-full max-w-md bg-white z-50 shadow-2xl flex flex-col overflow-hidden">
+
+        <!-- Drawer Header -->
+        <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100" style="background: linear-gradient(135deg, #5b6bff11, #7b3fe411);">
+          <div class="flex items-center gap-3">
+            <div
+              class="w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+              [class]="selectedWorker()!.active ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100 text-gray-400'">
+              {{ workerInitials(selectedWorker()!.name) }}
+            </div>
+            <div>
+              <p class="text-sm font-bold text-gray-900">{{ selectedWorker()!.name }}</p>
+              <p class="text-[11px]"
+                 [class]="selectedWorker()!.active ? 'text-green-600 font-semibold' : 'text-red-400 font-semibold'">
+                ● {{ selectedWorker()!.active ? 'Active' : 'Inactive' }}
+              </p>
+            </div>
+          </div>
+          <button type="button" (click)="closeDrawer()" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition">
+            <span class="material-icons-round text-xl">close</span>
+          </button>
+        </div>
+
+        <!-- Drawer Body -->
+        <div class="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+
+          <form [formGroup]="editForm" class="space-y-4">
+
+            <!-- Name -->
+            <div>
+              <label class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">Worker Name *</label>
+              <input
+                formControlName="name"
+                type="text"
+                class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+              @if (editForm.controls.name.invalid && editForm.controls.name.touched) {
+                <p class="text-xs text-red-500 mt-1">Name is required.</p>
+              }
+            </div>
+
+            <!-- Phone -->
+            <div>
+              <label class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">Phone *</label>
+              <input
+                formControlName="phone"
+                type="text"
+                inputmode="numeric"
+                maxlength="10"
+                class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+              @if (editForm.controls.phone.invalid && editForm.controls.phone.touched) {
+                <p class="text-xs text-red-500 mt-1">Must be 10 digits starting with 6-9.</p>
+              }
+            </div>
+
+            <!-- PIN (optional change) -->
+            <div>
+              <label class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">
+                New PIN (6 digits) <span class="normal-case font-normal text-gray-300">— leave blank to keep current</span>
+              </label>
+              <input
+                formControlName="pin"
+                type="password"
+                inputmode="numeric"
+                placeholder="••••••"
+                maxlength="6"
+                class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 placeholder:text-gray-300" />
+              @if (editForm.controls.pin.invalid && editForm.controls.pin.touched) {
+                <p class="text-xs text-red-500 mt-1">PIN must be exactly 6 digits.</p>
+              }
+            </div>
+
+          </form>
+
+          <!-- Module Access -->
+          <div>
+            <label class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">Module Access</label>
+            <div class="flex flex-wrap gap-2">
+              @for (module of moduleOptions; track module) {
+                <button
+                  type="button"
+                  (click)="toggleEditModule(module)"
+                  [class]="editModules().includes(module)
+                    ? 'rounded-full border px-3.5 py-1.5 text-xs font-semibold border-indigo-500 bg-indigo-50 text-indigo-600 transition'
+                    : 'rounded-full border px-3.5 py-1.5 text-xs font-semibold border-gray-200 bg-white text-gray-500 hover:border-indigo-300 hover:text-indigo-500 transition'">
+                  {{ module | titlecase }}
+                </button>
+              }
+            </div>
+            @if (editModules().length === 0) {
+              <p class="text-xs text-red-500 mt-1.5">Select at least one module.</p>
+            }
+          </div>
+
+          <!-- Worker Info (read-only) -->
+          <div class="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 space-y-1.5">
+            <p class="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">Worker Info</p>
+            <div class="flex justify-between text-xs">
+              <span class="text-gray-400">Worker ID</span>
+              <span class="text-gray-600 font-mono text-[11px]">{{ selectedWorker()!.worker_id }}</span>
+            </div>
+            <div class="flex justify-between text-xs">
+              <span class="text-gray-400">Created</span>
+              <span class="text-gray-600">{{ selectedWorker()!.created_at | date:'MMM d, yyyy, h:mm a' }}</span>
+            </div>
+          </div>
+
+          @if (editStatusMessage()) {
+            <div
+              class="rounded-lg border px-4 py-2.5 text-xs font-medium text-center"
+              [class]="editStatusKind() === 'success'
+                ? 'border-green-200 bg-green-50 text-green-700'
+                : 'border-red-200 bg-red-50 text-red-700'">
+              {{ editStatusMessage() }}
+            </div>
+          }
+
+        </div>
+
+        <!-- Drawer Footer -->
+        <div class="px-6 py-4 border-t border-gray-100 space-y-2 bg-white">
+          <button
+            type="button"
+            (click)="saveWorker()"
+            [disabled]="editForm.invalid || editModules().length === 0 || editSaving()"
+            class="w-full flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white transition hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+            style="background: linear-gradient(135deg, #5b6bff, #7b3fe4);">
+            <span class="material-icons-round text-base">save</span>
+            {{ editSaving() ? 'Saving...' : 'Save Changes' }}
+          </button>
+          <button
+            type="button"
+            (click)="toggleWorkerActive(selectedWorker()!)"
+            [disabled]="editSaving()"
+            class="w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold border transition disabled:opacity-50"
+            [class]="selectedWorker()!.active
+              ? 'border-red-200 text-red-500 hover:bg-red-50'
+              : 'border-green-200 text-green-600 hover:bg-green-50'">
+            <span class="material-icons-round text-base">{{ selectedWorker()!.active ? 'toggle_off' : 'toggle_on' }}</span>
+            {{ selectedWorker()!.active ? 'Deactivate Worker' : 'Activate Worker' }}
+          </button>
+        </div>
+
+      </div>
+    }
   `,
 })
 export class UsersComponent implements OnInit {
@@ -235,6 +385,13 @@ export class UsersComponent implements OnInit {
   readonly selectedModules = signal<WorkerModule[]>(['inwarding']);
   readonly currentPage = signal(0);
   readonly pageSize = 8;
+
+  // Edit drawer state
+  readonly selectedWorker = signal<OpsWorkerRow | null>(null);
+  readonly editModules = signal<WorkerModule[]>([]);
+  readonly editSaving = signal(false);
+  readonly editStatusMessage = signal('');
+  readonly editStatusKind = signal<'success' | 'error'>('success');
 
   readonly sortedWorkers = computed(() =>
     [...this.workers()].sort((a, b) => {
@@ -261,8 +418,17 @@ export class UsersComponent implements OnInit {
     ]],
     pin: ['', [
       Validators.required,
-      Validators.pattern(/^\d{4}$/),
+      Validators.pattern(/^\d{6}$/),
     ]],
+  });
+
+  readonly editForm = this.fb.nonNullable.group({
+    name: ['', Validators.required],
+    phone: ['', [
+      Validators.required,
+      Validators.pattern(/^[6-9]\d{9}$/),
+    ]],
+    pin: ['', Validators.pattern(/^\d{6}$/)],  // optional — blank = keep current PIN
   });
 
   ngOnInit(): void {
@@ -291,6 +457,8 @@ export class UsersComponent implements OnInit {
     this.loadingWorkers.set(false);
   }
 
+  // ── Create Worker ────────────────────────────────────────────
+
   toggleCreateModule(module: WorkerModule): void {
     this.selectedModules.update(modules =>
       modules.includes(module)
@@ -311,7 +479,6 @@ export class UsersComponent implements OnInit {
 
     this.saving.set(true);
     const { name, phone, pin } = this.workerForm.getRawValue();
-
     const workerId = `worker-${phone.trim()}-${Date.now()}`;
 
     const { error: workerError } = await this.supabase.client
@@ -331,14 +498,9 @@ export class UsersComponent implements OnInit {
       return;
     }
 
-    const moduleRows = this.selectedModules().map(module => ({
-      worker_id: workerId,
-      module,
-    }));
-
     const { error: moduleError } = await this.supabase.client
       .from('ops_worker_module_access')
-      .insert(moduleRows);
+      .insert(this.selectedModules().map(module => ({ worker_id: workerId, module })));
 
     if (moduleError) {
       this.setStatus(`Worker created but module assignment failed: ${moduleError.message}`, 'error');
@@ -352,6 +514,88 @@ export class UsersComponent implements OnInit {
     this.saving.set(false);
   }
 
+  // ── Edit Drawer ──────────────────────────────────────────────
+
+  openWorkerDetail(worker: OpsWorkerRow): void {
+    this.selectedWorker.set(worker);
+    this.editModules.set([...worker.modules]);
+    this.editStatusMessage.set('');
+    this.editForm.reset({
+      name: worker.name,
+      phone: worker.phone ?? '',
+      pin: '',
+    });
+  }
+
+  closeDrawer(): void {
+    this.selectedWorker.set(null);
+  }
+
+  toggleEditModule(module: WorkerModule): void {
+    this.editModules.update(modules =>
+      modules.includes(module)
+        ? modules.filter(m => m !== module)
+        : [...modules, module]
+    );
+  }
+
+  async saveWorker(): Promise<void> {
+    const worker = this.selectedWorker();
+    if (!worker || this.editForm.invalid) {
+      this.editForm.markAllAsTouched();
+      return;
+    }
+    if (this.editModules().length === 0) {
+      this.setEditStatus('Select at least one module.', 'error');
+      return;
+    }
+
+    this.editSaving.set(true);
+    const { name, phone, pin } = this.editForm.getRawValue();
+
+    const updatePayload: Record<string, string> = {
+      name: name.trim(),
+      phone: phone.trim(),
+    };
+    if (pin.trim()) {
+      updatePayload['pin'] = pin.trim();
+    }
+
+    const { error: updateError } = await this.supabase.client
+      .from('ops_workers')
+      .update(updatePayload)
+      .eq('worker_id', worker.worker_id);
+
+    if (updateError) {
+      this.setEditStatus(`Failed to update: ${updateError.message}`, 'error');
+      this.editSaving.set(false);
+      return;
+    }
+
+    // Replace module access: delete all existing, insert new selection
+    await this.supabase.client
+      .from('ops_worker_module_access')
+      .delete()
+      .eq('worker_id', worker.worker_id);
+
+    const { error: moduleError } = await this.supabase.client
+      .from('ops_worker_module_access')
+      .insert(this.editModules().map(m => ({ worker_id: worker.worker_id, module: m })));
+
+    if (moduleError) {
+      this.setEditStatus(`Details saved but module update failed: ${moduleError.message}`, 'error');
+    } else {
+      this.setEditStatus('Worker updated successfully.', 'success');
+      await this.loadWorkers();
+      // Refresh drawer to reflect saved state
+      const updated = this.workers().find(w => w.worker_id === worker.worker_id);
+      if (updated) this.selectedWorker.set(updated);
+    }
+    this.editSaving.set(false);
+  }
+
+  // ── Toggle Active ────────────────────────────────────────────
+
   async toggleWorkerActive(worker: OpsWorkerRow): Promise<void> {
     const { error } = await this.supabase.client
       .from('ops_workers')
@@ -359,9 +603,12 @@ export class UsersComponent implements OnInit {
       .eq('worker_id', worker.worker_id);
 
     if (!error) {
-      this.workers.update(ws =>
-        ws.map(w => w.worker_id === worker.worker_id ? { ...w, active: !w.active } : w)
-      );
+      await this.loadWorkers();
+      // If drawer is open, update its reference
+      if (this.selectedWorker()?.worker_id === worker.worker_id) {
+        const updated = this.workers().find(w => w.worker_id === worker.worker_id);
+        if (updated) this.selectedWorker.set(updated);
+      }
       this.setStatus(
         `Worker "${worker.name}" ${!worker.active ? 'activated' : 'deactivated'}.`,
         'success'
@@ -371,8 +618,12 @@ export class UsersComponent implements OnInit {
     }
   }
 
+  // ── Pagination ───────────────────────────────────────────────
+
   nextPage(): void { if (this.canNext()) this.currentPage.update(p => p + 1); }
   prevPage(): void { if (this.canPrev()) this.currentPage.update(p => p - 1); }
+
+  // ── Helpers ──────────────────────────────────────────────────
 
   workerInitials(name: string): string {
     return name
@@ -387,5 +638,10 @@ export class UsersComponent implements OnInit {
     this.statusKind.set(kind);
     this.statusMessage.set(message);
     setTimeout(() => this.statusMessage.set(''), 5000);
+  }
+
+  private setEditStatus(message: string, kind: 'success' | 'error'): void {
+    this.editStatusKind.set(kind);
+    this.editStatusMessage.set(message);
   }
 }
