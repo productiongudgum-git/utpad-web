@@ -1,345 +1,223 @@
-import { CommonModule, TitleCasePipe } from '@angular/common';
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { SupabaseService } from '../../../core/supabase.service';
 
 interface Ingredient {
-  id: string;
-  name: string;
-  unit: string;
-  active: boolean;
-  created_at: string;
+  id: string; name: string; barcode: string;
+  default_unit: string; reorder_point: number; current_stock: number;
+  vendor_names: string[];
 }
-
-interface Supplier {
-  id: string;
-  name: string;
-  contact: string | null;
-  active: boolean;
-  created_at: string;
-}
-
-const UNITS = ['kg', 'L', 'g', 'ml', 'pcs'];
 
 @Component({
   selector: 'app-ingredients',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, TitleCasePipe],
+  imports: [CommonModule, ReactiveFormsModule],
   template: `
-    <section class="min-h-full px-6 py-8" style="background:#f1f3f6;">
-
-      <!-- Page Header -->
-      <div class="mb-8">
-        <p class="text-xs font-bold uppercase tracking-widest mb-1" style="color:#5b6bff;">MASTER DATA</p>
-        <h1 class="text-3xl font-bold text-gray-900 leading-tight">Ingredients & Suppliers</h1>
-        <p class="text-sm text-gray-500 mt-1">Define the ingredients and vendors used in inwarding. All data syncs to the mobile app.</p>
+    <div style="padding:24px;max-width:1000px;">
+      <div style="margin-bottom:24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+        <div>
+          <h1 style="font-family:'Cabin',sans-serif;font-size:22px;font-weight:700;color:#121212;margin:0 0 4px;">Ingredients</h1>
+          <p style="color:#6B7280;font-size:14px;margin:0;">Master list of all raw ingredients.</p>
+        </div>
+        <button (click)="toggleForm()" style="padding:9px 18px;background:#01AC51;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;">
+          <span class="material-icons-round" style="font-size:18px;">{{ showForm() ? 'close' : 'add' }}</span>
+          {{ showForm() ? 'Cancel' : 'Add Ingredient' }}
+        </button>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-        <!-- ── INGREDIENTS PANEL ──────────────────────────────── -->
-        <div class="flex flex-col gap-5">
-
-          <!-- Create Ingredient -->
-          <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
-            <div class="flex items-center gap-2 mb-4">
-              <div class="w-7 h-7 rounded-full flex items-center justify-center" style="background:#5b6bff;">
-                <span class="material-icons-round text-white text-sm">science</span>
-              </div>
-              <h2 class="font-semibold text-gray-800 text-base">Add Ingredient</h2>
-            </div>
-
-            <form [formGroup]="ingredientForm" (ngSubmit)="createIngredient()" class="space-y-3">
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">Name *</label>
-                  <input
-                    formControlName="name"
-                    type="text"
-                    placeholder="e.g. Gum Base A"
-                    class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 placeholder:text-gray-300" />
-                  @if (ingredientForm.controls.name.invalid && ingredientForm.controls.name.touched) {
-                    <p class="text-xs text-red-500 mt-1">Name is required.</p>
-                  }
-                </div>
-                <div>
-                  <label class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">Unit *</label>
-                  <select
-                    formControlName="unit"
-                    class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100">
-                    @for (unit of units; track unit) {
-                      <option [value]="unit">{{ unit }}</option>
-                    }
-                  </select>
-                </div>
-              </div>
-              <button
-                type="submit"
-                [disabled]="ingredientForm.invalid || savingIngredient()"
-                class="w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-bold text-white transition hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                style="background: linear-gradient(135deg, #5b6bff, #7b3fe4);">
-                {{ savingIngredient() ? 'Saving...' : 'Add Ingredient' }}
-              </button>
-            </form>
-
-            @if (ingredientStatus()) {
-              <div
-                class="mt-3 rounded-lg border px-4 py-2 text-xs font-medium text-center"
-                [class]="ingredientStatusKind() === 'success' ? 'border-green-200 bg-green-50 text-green-700' : 'border-red-200 bg-red-50 text-red-700'">
-                {{ ingredientStatus() }}
-              </div>
-            }
-          </div>
-
-          <!-- Ingredients List -->
-          <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-            <div class="px-6 py-4 flex items-center justify-between border-b border-gray-100">
-              <div class="flex items-center gap-3">
-                <h2 class="text-base font-bold text-gray-900">Ingredients</h2>
-                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-indigo-100 text-indigo-600">
-                  {{ ingredients().length }} TOTAL
-                </span>
-              </div>
-              <button type="button" (click)="loadIngredients()" class="text-xs text-blue-600 hover:underline">Refresh</button>
-            </div>
-
-            @if (loadingIngredients()) {
-              <div class="px-6 py-8 text-center text-sm text-gray-400">Loading...</div>
-            } @else if (ingredients().length === 0) {
-              <div class="px-6 py-10 text-center text-sm text-gray-400">No ingredients yet. Add your first one above.</div>
-            } @else {
-              <div class="divide-y divide-gray-50">
-                @for (ing of ingredients(); track ing.id) {
-                  <div class="px-6 py-3 flex items-center gap-3 hover:bg-gray-50">
-                    <div class="flex-1 min-w-0">
-                      <p class="text-sm font-semibold text-gray-900">{{ ing.name }}</p>
-                      <p class="text-xs text-gray-400 mt-0.5">Unit: {{ ing.unit }}</p>
-                    </div>
-                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase" [class]="ing.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'">
-                      {{ ing.active ? 'Active' : 'Inactive' }}
-                    </span>
-                    <button
-                      type="button"
-                      (click)="toggleIngredient(ing)"
-                      class="text-xs px-2 py-1 rounded-lg border transition"
-                      [class]="ing.active ? 'border-red-200 text-red-500 hover:bg-red-50' : 'border-green-200 text-green-600 hover:bg-green-50'">
-                      {{ ing.active ? 'Disable' : 'Enable' }}
-                    </button>
-                  </div>
-                }
-              </div>
-            }
-          </div>
-        </div>
-
-        <!-- ── SUPPLIERS PANEL ─────────────────────────────────── -->
-        <div class="flex flex-col gap-5">
-
-          <!-- Create Supplier -->
-          <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
-            <div class="flex items-center gap-2 mb-4">
-              <div class="w-7 h-7 rounded-full flex items-center justify-center" style="background:#7b3fe4;">
-                <span class="material-icons-round text-white text-sm">local_shipping</span>
-              </div>
-              <h2 class="font-semibold text-gray-800 text-base">Add Vendor / Supplier</h2>
-            </div>
-
-            <form [formGroup]="supplierForm" (ngSubmit)="createSupplier()" class="space-y-3">
+      @if (showForm()) {
+        <div style="background:#fff;border-radius:12px;border:1px solid #E5E7EB;padding:24px;margin-bottom:24px;">
+          <h2 style="font-family:'Cabin',sans-serif;font-size:16px;font-weight:600;color:#121212;margin:0 0 20px;">{{ editId() ? 'Edit' : 'Add' }} Ingredient</h2>
+          <form [formGroup]="form" (ngSubmit)="save()">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px;" class="ing-grid">
               <div>
-                <label class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">Vendor Name *</label>
-                <input
-                  formControlName="name"
-                  type="text"
-                  placeholder="e.g. Alpha Ingredients Ltd"
-                  class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 placeholder:text-gray-300" />
-                @if (supplierForm.controls.name.invalid && supplierForm.controls.name.touched) {
-                  <p class="text-xs text-red-500 mt-1">Name is required.</p>
-                }
+                <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Name *</label>
+                <input formControlName="name" class="gg-input" placeholder="e.g. Gum Base">
               </div>
               <div>
-                <label class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">Contact / Phone (optional)</label>
-                <input
-                  formControlName="contact"
-                  type="text"
-                  placeholder="e.g. 9876543210"
-                  class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 placeholder:text-gray-300" />
+                <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Barcode</label>
+                <input formControlName="barcode" class="gg-input" placeholder="e.g. 8901234567890">
               </div>
-              <button
-                type="submit"
-                [disabled]="supplierForm.invalid || savingSupplier()"
-                class="w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-bold text-white transition hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                style="background: linear-gradient(135deg, #7b3fe4, #5b6bff);">
-                {{ savingSupplier() ? 'Saving...' : 'Add Vendor' }}
-              </button>
-            </form>
-
-            @if (supplierStatus()) {
-              <div
-                class="mt-3 rounded-lg border px-4 py-2 text-xs font-medium text-center"
-                [class]="supplierStatusKind() === 'success' ? 'border-green-200 bg-green-50 text-green-700' : 'border-red-200 bg-red-50 text-red-700'">
-                {{ supplierStatus() }}
+              <div>
+                <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Default Unit *</label>
+                <select formControlName="default_unit" class="gg-input dropdown-with-arrow">
+                  <option value="kg">kg</option><option value="g">g</option>
+                  <option value="L">L</option><option value="ml">ml</option>
+                  <option value="pcs">pcs</option><option value="boxes">boxes</option>
+                </select>
               </div>
-            }
-          </div>
-
-          <!-- Suppliers List -->
-          <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-            <div class="px-6 py-4 flex items-center justify-between border-b border-gray-100">
-              <div class="flex items-center gap-3">
-                <h2 class="text-base font-bold text-gray-900">Vendors / Suppliers</h2>
-                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-purple-100 text-purple-600">
-                  {{ suppliers().length }} TOTAL
-                </span>
+              <div>
+                <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Reorder Point</label>
+                <input formControlName="reorder_point" type="number" min="0" class="gg-input" placeholder="10">
               </div>
-              <button type="button" (click)="loadSuppliers()" class="text-xs text-blue-600 hover:underline">Refresh</button>
+              <div>
+                <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Current Stock</label>
+                <input formControlName="current_stock" type="number" min="0" step="0.01" class="gg-input" placeholder="0">
+              </div>
             </div>
-
-            @if (loadingSuppliers()) {
-              <div class="px-6 py-8 text-center text-sm text-gray-400">Loading...</div>
-            } @else if (suppliers().length === 0) {
-              <div class="px-6 py-10 text-center text-sm text-gray-400">No vendors yet. Add your first one above.</div>
-            } @else {
-              <div class="divide-y divide-gray-50">
-                @for (sup of suppliers(); track sup.id) {
-                  <div class="px-6 py-3 flex items-center gap-3 hover:bg-gray-50">
-                    <div class="flex-1 min-w-0">
-                      <p class="text-sm font-semibold text-gray-900">{{ sup.name }}</p>
-                      <p class="text-xs text-gray-400 mt-0.5">{{ sup.contact ?? 'No contact' }}</p>
-                    </div>
-                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase" [class]="sup.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'">
-                      {{ sup.active ? 'Active' : 'Inactive' }}
-                    </span>
-                    <button
-                      type="button"
-                      (click)="toggleSupplier(sup)"
-                      class="text-xs px-2 py-1 rounded-lg border transition"
-                      [class]="sup.active ? 'border-red-200 text-red-500 hover:bg-red-50' : 'border-green-200 text-green-600 hover:bg-green-50'">
-                      {{ sup.active ? 'Disable' : 'Enable' }}
-                    </button>
-                  </div>
-                }
-              </div>
+            @if (formError()) {
+              <p style="color:#FF2828;font-size:13px;margin-bottom:12px;">{{ formError() }}</p>
             }
-          </div>
+            <div style="display:flex;gap:10px;">
+              <button type="submit" [disabled]="saving()" class="gg-btn-primary">{{ saving() ? 'Saving...' : (editId() ? 'Update' : 'Add Ingredient') }}</button>
+              @if (editId()) {
+                <button type="button" (click)="cancelEdit()" style="padding:8px 16px;background:#f3f4f6;border:1px solid #E5E7EB;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;color:#374151;">Cancel</button>
+              }
+            </div>
+          </form>
         </div>
+      }
 
-      </div>
-    </section>
+      @if (toast()) {
+        <div class="toast" [class.toast-success]="toastKind()==='success'" [class.toast-error]="toastKind()==='error'">{{ toast() }}</div>
+      }
+
+      @if (loading()) {
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          @for (i of [1,2,3,4]; track i) { <div class="gg-skeleton" style="height:64px;border-radius:10px;"></div> }
+        </div>
+      } @else if (ingredients().length === 0) {
+        <div style="text-align:center;padding:60px 0;color:#9CA3AF;">
+          <span class="material-icons-round" style="font-size:48px;display:block;margin-bottom:12px;">category</span>
+          <p style="font-size:15px;margin:0;">No ingredients yet.</p>
+        </div>
+      } @else {
+        <div style="background:#fff;border-radius:12px;border:1px solid #E5E7EB;overflow:hidden;">
+          <table style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="background:#f8f9fa;border-bottom:1px solid #E5E7EB;">
+                <th style="text-align:left;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;">Name</th>
+                <th style="text-align:left;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;">Barcode</th>
+                <th style="text-align:right;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;">Stock</th>
+                <th style="text-align:right;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;">Reorder</th>
+                <th style="text-align:left;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;">Vendors</th>
+                <th style="text-align:center;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (ing of ingredients(); track ing.id) {
+                <tr style="border-bottom:1px solid #f3f4f6;">
+                  <td style="padding:12px 16px;">
+                    <span style="font-size:14px;font-weight:600;color:#121212;">{{ ing.name }}</span>
+                    <span style="margin-left:6px;background:#f3f4f6;color:#6B7280;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:500;">{{ ing.default_unit }}</span>
+                  </td>
+                  <td style="padding:12px 16px;font-size:13px;color:#6B7280;font-family:monospace;">{{ ing.barcode || '—' }}</td>
+                  <td style="padding:12px 16px;text-align:right;font-size:13px;font-weight:600;" [style.color]="ing.current_stock <= ing.reorder_point ? '#dc2626' : '#15803d'">
+                    {{ ing.current_stock | number:'1.0-2' }} {{ ing.default_unit }}
+                  </td>
+                  <td style="padding:12px 16px;text-align:right;font-size:13px;color:#6B7280;">{{ ing.reorder_point | number:'1.0-2' }}</td>
+                  <td style="padding:12px 16px;font-size:12px;color:#6B7280;">
+                    {{ ing.vendor_names.length ? ing.vendor_names.join(', ') : '—' }}
+                  </td>
+                  <td style="padding:12px 16px;text-align:center;">
+                    <div style="display:flex;align-items:center;justify-content:center;gap:6px;">
+                      <button (click)="startEdit(ing)" style="padding:4px 10px;background:#f0fdf4;border:1px solid #01AC51;color:#01AC51;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">Edit</button>
+                      <button (click)="deleteIngredient(ing.id)" style="padding:4px 10px;background:#fff5f5;border:1px solid #fca5a5;color:#dc2626;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">Delete</button>
+                    </div>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </div>
+    <style>
+      @media (max-width:700px) { .ing-grid { grid-template-columns: 1fr 1fr !important; } }
+      @media (max-width:480px) { .ing-grid { grid-template-columns: 1fr !important; } }
+    </style>
   `,
 })
 export class IngredientsComponent implements OnInit {
-  private readonly fb = inject(FormBuilder);
   private readonly supabase = inject(SupabaseService);
+  private readonly fb = inject(FormBuilder);
 
-  readonly units = UNITS;
+  loading = signal(true);
+  saving = signal(false);
+  showForm = signal(false);
+  editId = signal<string | null>(null);
+  ingredients = signal<Ingredient[]>([]);
+  formError = signal('');
+  toast = signal('');
+  toastKind = signal<'success'|'error'>('success');
 
-  readonly ingredients = signal<Ingredient[]>([]);
-  readonly suppliers = signal<Supplier[]>([]);
-  readonly loadingIngredients = signal(false);
-  readonly loadingSuppliers = signal(false);
-  readonly savingIngredient = signal(false);
-  readonly savingSupplier = signal(false);
-  readonly ingredientStatus = signal('');
-  readonly ingredientStatusKind = signal<'success' | 'error'>('success');
-  readonly supplierStatus = signal('');
-  readonly supplierStatusKind = signal<'success' | 'error'>('success');
-
-  readonly ingredientForm = this.fb.nonNullable.group({
+  form = this.fb.nonNullable.group({
     name: ['', Validators.required],
-    unit: ['kg', Validators.required],
+    barcode: [''],
+    default_unit: ['kg', Validators.required],
+    reorder_point: [10],
+    current_stock: [0],
   });
 
-  readonly supplierForm = this.fb.nonNullable.group({
-    name: ['', Validators.required],
-    contact: [''],
-  });
+  async ngOnInit(): Promise<void> { await this.loadData(); }
 
-  ngOnInit(): void {
-    void this.loadIngredients();
-    void this.loadSuppliers();
+  toggleForm(): void {
+    if (this.showForm()) { this.cancelEdit(); } else { this.showForm.set(true); }
   }
 
-  async loadIngredients(): Promise<void> {
-    this.loadingIngredients.set(true);
-    const { data, error } = await this.supabase.client
-      .from('recipe_ingredients')
-      .select('id, name, unit, active, created_at')
-      .order('name', { ascending: true });
-    if (!error && data) this.ingredients.set(data as Ingredient[]);
-    this.loadingIngredients.set(false);
+  startEdit(ing: Ingredient): void {
+    this.editId.set(ing.id);
+    this.form.setValue({ name: ing.name, barcode: ing.barcode, default_unit: ing.default_unit, reorder_point: ing.reorder_point, current_stock: ing.current_stock });
+    this.showForm.set(true);
   }
 
-  async loadSuppliers(): Promise<void> {
-    this.loadingSuppliers.set(true);
-    const { data, error } = await this.supabase.client
-      .from('suppliers')
-      .select('id, name, contact, active, created_at')
-      .order('name', { ascending: true });
-    if (!error && data) this.suppliers.set(data as Supplier[]);
-    this.loadingSuppliers.set(false);
+  cancelEdit(): void {
+    this.editId.set(null);
+    this.form.reset({ name: '', barcode: '', default_unit: 'kg', reorder_point: 10, current_stock: 0 });
+    this.showForm.set(false);
   }
 
-  async createIngredient(): Promise<void> {
-    if (this.ingredientForm.invalid) { this.ingredientForm.markAllAsTouched(); return; }
-    this.savingIngredient.set(true);
-    const { name, unit } = this.ingredientForm.getRawValue();
-    const id = `ing-${Date.now()}`;
-    const { error } = await this.supabase.client
-      .from('recipe_ingredients')
-      .insert({ id, name: name.trim(), unit, active: true });
-    if (error) {
-      this.setIngredientStatus(`Failed: ${error.message}`, 'error');
+  async save(): Promise<void> {
+    if (this.form.invalid) { this.form.markAllAsTouched(); return; }
+    this.saving.set(true);
+    this.formError.set('');
+    const v = this.form.getRawValue();
+    if (this.editId()) {
+      const { error } = await this.supabase.client.from('gg_ingredients').update(v).eq('id', this.editId()!);
+      if (error) { this.formError.set(error.message); this.saving.set(false); return; }
     } else {
-      this.setIngredientStatus(`"${name}" added successfully.`, 'success');
-      this.ingredientForm.reset({ name: '', unit: 'kg' });
-      await this.loadIngredients();
+      const { error } = await this.supabase.client.from('gg_ingredients').insert(v);
+      if (error) { this.formError.set(error.message); this.saving.set(false); return; }
     }
-    this.savingIngredient.set(false);
+    this.showToast(this.editId() ? 'Updated' : 'Ingredient added', 'success');
+    this.cancelEdit();
+    await this.loadData();
+    this.saving.set(false);
   }
 
-  async createSupplier(): Promise<void> {
-    if (this.supplierForm.invalid) { this.supplierForm.markAllAsTouched(); return; }
-    this.savingSupplier.set(true);
-    const { name, contact } = this.supplierForm.getRawValue();
-    const id = `sup-${Date.now()}`;
-    const { error } = await this.supabase.client
-      .from('suppliers')
-      .insert({ id, name: name.trim(), contact: contact.trim() || null, active: true });
-    if (error) {
-      this.setSupplierStatus(`Failed: ${error.message}`, 'error');
-    } else {
-      this.setSupplierStatus(`"${name}" added successfully.`, 'success');
-      this.supplierForm.reset({ name: '', contact: '' });
-      await this.loadSuppliers();
-    }
-    this.savingSupplier.set(false);
+  async deleteIngredient(id: string): Promise<void> {
+    if (!confirm('Delete this ingredient?')) return;
+    const { error } = await this.supabase.client.from('gg_ingredients').delete().eq('id', id);
+    if (!error) { this.showToast('Deleted', 'success'); await this.loadData(); }
+    else this.showToast(error.message, 'error');
   }
 
-  async toggleIngredient(ing: Ingredient): Promise<void> {
-    await this.supabase.client
-      .from('recipe_ingredients')
-      .update({ active: !ing.active })
-      .eq('id', ing.id);
-    await this.loadIngredients();
+  private async loadData(): Promise<void> {
+    this.loading.set(true);
+    const { data: ings } = await this.supabase.client.from('gg_ingredients')
+      .select('id, name, barcode, default_unit, reorder_point, current_stock').order('name');
+    const { data: vi } = await this.supabase.client
+      .from('gg_vendor_ingredients').select('ingredient_id, gg_vendors(name)');
+
+    const vendorMap = new Map<string, string[]>();
+    (vi ?? []).forEach((row: any) => {
+      const key = row.ingredient_id;
+      if (!vendorMap.has(key)) vendorMap.set(key, []);
+      if (row.gg_vendors?.name) vendorMap.get(key)!.push(row.gg_vendors.name);
+    });
+
+    this.ingredients.set((ings ?? []).map((i: any) => ({
+      id: i.id, name: i.name, barcode: i.barcode ?? '',
+      default_unit: i.default_unit ?? 'kg', reorder_point: i.reorder_point ?? 0,
+      current_stock: i.current_stock ?? 0,
+      vendor_names: vendorMap.get(i.id) ?? [],
+    })));
+    this.loading.set(false);
   }
 
-  async toggleSupplier(sup: Supplier): Promise<void> {
-    await this.supabase.client
-      .from('suppliers')
-      .update({ active: !sup.active })
-      .eq('id', sup.id);
-    await this.loadSuppliers();
-  }
-
-  private setIngredientStatus(message: string, kind: 'success' | 'error'): void {
-    this.ingredientStatusKind.set(kind);
-    this.ingredientStatus.set(message);
-    setTimeout(() => this.ingredientStatus.set(''), 5000);
-  }
-
-  private setSupplierStatus(message: string, kind: 'success' | 'error'): void {
-    this.supplierStatusKind.set(kind);
-    this.supplierStatus.set(message);
-    setTimeout(() => this.supplierStatus.set(''), 5000);
+  private showToast(msg: string, kind: 'success'|'error'): void {
+    this.toast.set(msg); this.toastKind.set(kind);
+    setTimeout(() => this.toast.set(''), 3000);
   }
 }

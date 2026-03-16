@@ -1,316 +1,73 @@
-import { Injectable, inject, signal, computed } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { Injectable, signal, computed, inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { Observable, tap, catchError, throwError, BehaviorSubject } from 'rxjs';
-
-import { environment } from '../../../environments/environment';
-import { TokenService } from './token.service';
 import { SupabaseService } from '../supabase.service';
-import {
-  User,
-  LoginEmailRequest,
-  LoginEmailResponse,
-  LoginSuccessResponse,
-  LoginRequires2FAResponse,
-  TwoFactorVerifyRequest,
-  TwoFactorVerifyResponse,
-  RefreshTokenRequest,
-  RefreshTokenResponse,
-  LogoutRequest,
-  PasswordResetRequest,
-  PasswordResetRequestResponse,
-  PasswordResetConfirmRequest,
-  PasswordResetConfirmResponse,
-  GetMeResponse,
-  GetPermissionsResponse,
-  TwoFactorEnableResponse,
-  TwoFactorDisableRequest,
-  TwoFactorDisableResponse,
-  Permission,
-  isLoginRequires2FA,
-  isLoginSuccess,
-  UserRole,
-  PermissionModule,
-  PermissionAction,
-} from '../../shared/models/auth.models';
+
+export interface GgUser {
+  id: string;
+  username: string;
+  name: string;
+  role: string;
+  modules: string[];
+  mobile_number?: string;
+  active?: boolean;
+}
+
+const SESSION_KEY = 'gg_admin_user';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
-  private readonly http = inject(HttpClient);
-  private readonly tokenService = inject(TokenService);
-  private readonly supabaseService = inject(SupabaseService);
+  private readonly supabase = inject(SupabaseService);
   private readonly router = inject(Router);
-  private readonly apiUrl = `${environment.apiBaseUrl}/auth`;
 
-  // State
-  private _currentUser = signal<User | null>(null);
-  private _permissions = signal<Permission[]>([]);
-  private _isLoading = signal(false);
+  private readonly _currentUser = signal<GgUser | null>(this.restoreFromSession());
 
-  // Refresh token mutex to prevent concurrent refresh calls
-  private _isRefreshing = false;
-  private _refreshTokenSubject = new BehaviorSubject<string | null>(null);
-
-  // Public readonly signals
   readonly currentUser = this._currentUser.asReadonly();
-  readonly permissions = this._permissions.asReadonly();
-  readonly isLoading = this._isLoading.asReadonly();
-  readonly isAuthenticated = this.tokenService.isAuthenticated;
+  readonly isAuthenticated = computed(() => this._currentUser() !== null);
 
-  readonly currentRole = computed(() => this._currentUser()?.role ?? null);
-  readonly tenantId = computed(() => this._currentUser()?.tenantId ?? null);
-  readonly factoryIds = computed(() => this._currentUser()?.factoryIds ?? []);
-
-  // Inactivity timeout
-  private _inactivityTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly INACTIVITY_TIMEOUT_MS = environment.sessionTimeoutMinutes * 60 * 1000;
-
-  // ── Authentication ───────────────────────────
-
-  loginWithEmail(email: string, password: string): Observable<LoginSuccessResponse> {
-    this._isLoading.set(true);
-
-    const supabaseUrl = environment.supabase.apiUrl;
-    const supabaseKey = environment.supabase.publishableKey;
-
-    return new Observable<LoginSuccessResponse>((observer) => {
-      fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': supabaseKey,
-          'Authorization': `Bearer ${supabaseKey}`,
-        },
-        body: JSON.stringify({ email, password }),
-      })
-        .then((res) => res.json().then((data) => ({ status: res.status, data })))
-        .then(({ status, data }) => {
-          if (status >= 400) {
-            const msg = data?.error_description || data?.msg || data?.message || 'Invalid email or password.';
-            const err: any = new Error(msg);
-            err.status = status === 400 ? 401 : status;
-            err.error = { message: msg };
-            this._isLoading.set(false);
-            observer.error(err);
-            return;
-          }
-
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const user = data.user;
-          const response: any = {
-            accessToken: data.access_token,
-            refreshToken: data.refresh_token,
-            expiresIn: data.expires_in || 3600,
-            user: {
-              userId: user.id,
-              tenantId: 'default-tenant',
-              name: user.user_metadata?.full_name || user.email,
-              email: user.email,
-              role: 'Admin',
-              factoryIds: ['factory-1'],
-              subscriptionTier: 'starter',
-            },
-          };
-          this.handleLoginSuccess(response);
-          this._isLoading.set(false);
-          observer.next(response);
-          observer.complete();
-        })
-        .catch((err) => {
-          this._isLoading.set(false);
-          observer.error(err);
-        });
-    });
+  // Alias so interceptor can reference isAuthenticated as a function
+  isAuth(): boolean {
+    return this._currentUser() !== null;
   }
 
-  loginWithPhone(phone: string, pin: string): Observable<LoginSuccessResponse> {
+  async login(username: string, password: string): Promise<void> {
+    const { data, error } = await this.supabase.client
+      .from('gg_users')
+      .select('id, username, name, role, modules, mobile_number, active, password_hash')
+      .eq('username', username)
+      .eq('role', 'admin')
+      .maybeSingle();
 
-    this._isLoading.set(true);
+    if (error) throw new Error('Database error: ' + error.message);
+    if (!data) throw new Error('Invalid credentials');
+    if (data.password_hash !== password) throw new Error('Invalid credentials');
+    if (data.active === false) throw new Error('Account is disabled');
 
-    // We send phone and pin to our new endpoints.
-    // The previous implementation used email/password DTOs, but we will adjust the payload.
-    const request = {
-      phone,
-      pin,
-      deviceInfo: {
-        deviceType: 'web',
-        userAgent: navigator.userAgent,
-      },
+    const user: GgUser = {
+      id: data.id,
+      username: data.username,
+      name: data.name ?? data.username,
+      role: data.role,
+      modules: data.modules ?? [],
+      mobile_number: data.mobile_number,
+      active: data.active,
     };
 
-    return this.http.post<LoginSuccessResponse>(`${this.apiUrl}/login/phone`, request).pipe(
-      tap((response) => {
-        this.handleLoginSuccess(response);
-        this._isLoading.set(false);
-      }),
-      catchError((err) => {
-        this._isLoading.set(false);
-        return throwError(() => err);
-      })
-    );
+    this._currentUser.set(user);
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(user));
   }
 
-  logout(): Observable<void> {
-    const accessToken = this.tokenService.getAccessToken();
-    const refreshToken = this.tokenService.getRefreshToken();
-
-    // Clear local state immediately
-    this.clearSession();
-
-    if (accessToken && refreshToken) {
-      const request: LogoutRequest = { accessToken, refreshToken };
-      return this.http.post<void>(`${this.apiUrl}/logout`, request).pipe(
-        catchError(() => {
-          // Even if server logout fails, local state is already cleared
-          return throwError(() => new Error('Server logout failed'));
-        })
-      );
-    }
-
-    return new Observable((subscriber) => {
-      subscriber.next();
-      subscriber.complete();
-    });
-  }
-
-  // ── Token Refresh ────────────────────────────
-
-  refreshAccessToken(): Observable<RefreshTokenResponse> {
-    const refreshToken = this.tokenService.getRefreshToken();
-    if (!refreshToken) {
-      return throwError(() => new Error('No refresh token available'));
-    }
-
-    const request: RefreshTokenRequest = { refreshToken };
-    return this.http.post<RefreshTokenResponse>(`${this.apiUrl}/refresh`, request).pipe(
-      tap((response) => {
-        this.tokenService.setTokens(response.accessToken, response.refreshToken);
-        this.resetInactivityTimer();
-      }),
-      catchError((err) => {
-        this.clearSession();
-        this.router.navigate(['/auth/login']);
-        return throwError(() => err);
-      })
-    );
-  }
-
-  get isRefreshing(): boolean {
-    return this._isRefreshing;
-  }
-
-  set isRefreshing(value: boolean) {
-    this._isRefreshing = value;
-  }
-
-  get refreshTokenSubject(): BehaviorSubject<string | null> {
-    return this._refreshTokenSubject;
-  }
-
-  // ── Password Reset ───────────────────────────
-
-  requestPasswordReset(email: string): Observable<PasswordResetRequestResponse> {
-    const request: PasswordResetRequest = { email };
-    return this.http.post<PasswordResetRequestResponse>(
-      `${this.apiUrl}/password/reset-request`,
-      request
-    );
-  }
-
-  confirmPasswordReset(token: string, newPassword: string): Observable<PasswordResetConfirmResponse> {
-    const request: PasswordResetConfirmRequest = { token, newPassword };
-    return this.http.post<PasswordResetConfirmResponse>(
-      `${this.apiUrl}/password/reset-confirm`,
-      request
-    );
-  }
-
-  // ── 2FA Management ───────────────────────────
-
-  enable2FA(): Observable<TwoFactorEnableResponse> {
-    return this.http.post<TwoFactorEnableResponse>(`${this.apiUrl}/2fa/enable`, {});
-  }
-
-  disable2FA(totpCode: string): Observable<TwoFactorDisableResponse> {
-    const request: TwoFactorDisableRequest = { totpCode };
-    return this.http.post<TwoFactorDisableResponse>(`${this.apiUrl}/2fa/disable`, request);
-  }
-
-  // ── User Info ────────────────────────────────
-
-  fetchCurrentUser(): Observable<GetMeResponse> {
-    return this.http.get<GetMeResponse>(`${this.apiUrl}/me`).pipe(
-      tap((user) => {
-        this._currentUser.set(user);
-      })
-    );
-  }
-
-  fetchPermissions(): Observable<GetPermissionsResponse> {
-    return this.http.get<GetPermissionsResponse>(`${this.apiUrl}/permissions`).pipe(
-      tap((response) => {
-        this._permissions.set(response.permissions);
-      })
-    );
-  }
-
-  // ── Permission Checks ────────────────────────
-
-  hasPermission(module: PermissionModule, action: PermissionAction): boolean {
-    return this._permissions().some(
-      (p) => p.module === module && p.action === action
-    );
-  }
-
-  hasRole(role: UserRole): boolean {
-    return this._currentUser()?.role === role;
-  }
-
-  hasAnyRole(...roles: UserRole[]): boolean {
-    const currentRole = this._currentUser()?.role;
-    return currentRole !== undefined && roles.includes(currentRole);
-  }
-
-  // ── Session Management ───────────────────────
-
-  resetInactivityTimer(): void {
-    if (this._inactivityTimer) {
-      clearTimeout(this._inactivityTimer);
-    }
-    this._inactivityTimer = setTimeout(() => {
-      this.handleSessionTimeout();
-    }, this.INACTIVITY_TIMEOUT_MS);
-  }
-
-  private handleSessionTimeout(): void {
-    this.clearSession();
-    this.router.navigate(['/auth/login'], {
-      queryParams: { reason: 'session_timeout' },
-    });
-  }
-
-  // ── Private Helpers ──────────────────────────
-
-  private handleLoginSuccess(response: LoginSuccessResponse): void {
-    this.tokenService.setTokens(response.accessToken, response.refreshToken);
-    // Sync JWT to the Supabase JS client so RLS policies see the authenticated role.
-    void this.supabaseService.client.auth.setSession({
-      access_token: response.accessToken,
-      refresh_token: response.refreshToken,
-    });
-    this._currentUser.set(response.user);
-    this.resetInactivityTimer();
-    this.fetchPermissions().subscribe();
-  }
-
-  private clearSession(): void {
-    this.tokenService.clearTokens();
-    void this.supabaseService.client.auth.signOut();
+  logout(): void {
     this._currentUser.set(null);
-    this._permissions.set([]);
-    if (this._inactivityTimer) {
-      clearTimeout(this._inactivityTimer);
-      this._inactivityTimer = null;
+    sessionStorage.removeItem(SESSION_KEY);
+    void this.router.navigate(['/auth/login']);
+  }
+
+  private restoreFromSession(): GgUser | null {
+    try {
+      const stored = sessionStorage.getItem(SESSION_KEY);
+      return stored ? (JSON.parse(stored) as GgUser) : null;
+    } catch {
+      return null;
     }
   }
 }

@@ -1,198 +1,207 @@
 import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { InventoryService } from './inventory.service';
+import { SupabaseService } from '../../../core/supabase.service';
+
+interface IngredientStock {
+  id: string;
+  name: string;
+  current_stock: number;
+  reorder_point: number;
+  default_unit: string;
+  isLow: boolean;
+}
 
 @Component({
   selector: 'app-inventory',
   standalone: true,
   imports: [CommonModule, FormsModule],
   template: `
-    <div class="p-6">
-      <!-- Header -->
-      <div class="flex items-center justify-between mb-6">
-        <h2 class="text-2xl font-bold text-gray-900">Inventory</h2>
-        <button (click)="inventoryService.load()" class="text-sm text-blue-600 hover:underline">Refresh</button>
+    <div style="padding:24px;max-width:1000px;">
+      <div style="margin-bottom:24px;">
+        <h1 style="font-family:'Cabin',sans-serif;font-size:22px;font-weight:700;color:#121212;margin:0 0 4px;">Inventory</h1>
+        <p style="color:#6B7280;font-size:14px;margin:0;">Current stock levels for all ingredients. Items in red are below reorder point.</p>
       </div>
 
-      <!-- Tab navigation -->
-      <div class="flex border-b border-gray-200 mb-6">
-        <button
-          (click)="activeTab.set('raw')"
-          [class]="activeTab() === 'raw'
-            ? 'px-4 py-2 text-sm font-semibold text-blue-600 border-b-2 border-blue-600 -mb-px'
-            : 'px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700'">
-          Raw Materials
-          @if (lowStockCount() > 0) {
-            <span class="ml-2 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">
-              {{ lowStockCount() }} LOW
-            </span>
+      <!-- Search + filter -->
+      <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
+        <input [(ngModel)]="searchTerm" (ngModelChange)="onFilterChange()" placeholder="Search ingredients..." class="gg-input" style="max-width:280px;">
+        <select [(ngModel)]="filter" (ngModelChange)="onFilterChange()" class="gg-input dropdown-with-arrow" style="max-width:200px;">
+          <option value="all">All Items</option>
+          <option value="low">Low Stock Only</option>
+          <option value="ok">In Stock</option>
+        </select>
+        <button (click)="loadData()" style="padding:8px 16px;background:#f3f4f6;border:1px solid #E5E7EB;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:6px;color:#374151;">
+          <span class="material-icons-round" style="font-size:16px;">refresh</span>
+          Refresh
+        </button>
+      </div>
+
+      <!-- Stats row -->
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;" class="inv-stats">
+        <div style="background:#fff;border-radius:10px;border:1px solid #E5E7EB;padding:16px;text-align:center;">
+          <p style="font-size:26px;font-weight:700;color:#121212;margin:0;font-family:'Cabin',sans-serif;">{{ items().length }}</p>
+          <p style="font-size:12px;color:#6B7280;margin:4px 0 0;">Total Ingredients</p>
+        </div>
+        <div style="background:#fff;border-radius:10px;border:1px solid #E5E7EB;padding:16px;text-align:center;">
+          <p style="font-size:26px;font-weight:700;color:#01AC51;margin:0;font-family:'Cabin',sans-serif;">{{ okCount() }}</p>
+          <p style="font-size:12px;color:#6B7280;margin:4px 0 0;">In Stock</p>
+        </div>
+        <div style="background:#fff;border-radius:10px;border:1px solid #E5E7EB;padding:16px;text-align:center;">
+          <p style="font-size:26px;font-weight:700;color:#FF2828;margin:0;font-family:'Cabin',sans-serif;">{{ lowCount() }}</p>
+          <p style="font-size:12px;color:#6B7280;margin:4px 0 0;">Low / Out of Stock</p>
+        </div>
+      </div>
+
+      @if (toast()) {
+        <div class="toast" [class.toast-success]="toastKind()==='success'" [class.toast-error]="toastKind()==='error'">{{ toast() }}</div>
+      }
+
+      @if (loading()) {
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          @for (i of [1,2,3,4,5]; track i) {
+            <div class="gg-skeleton" style="height:56px;border-radius:10px;"></div>
           }
-        </button>
-        <button
-          (click)="activeTab.set('finished')"
-          [class]="activeTab() === 'finished'
-            ? 'px-4 py-2 text-sm font-semibold text-blue-600 border-b-2 border-blue-600 -mb-px'
-            : 'px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700'">
-          Finished Goods
-        </button>
-      </div>
-
-      @if (inventoryService.loading()) {
-        <div class="text-center py-8 text-gray-500">Loading...</div>
+        </div>
+      } @else if (filtered().length === 0) {
+        <div style="text-align:center;padding:60px 0;color:#9CA3AF;">
+          <span class="material-icons-round" style="font-size:48px;display:block;margin-bottom:12px;">inventory_2</span>
+          <p style="font-size:15px;margin:0;">No items match your filter.</p>
+        </div>
       } @else {
-
-        <!-- RAW MATERIALS TAB -->
-        @if (activeTab() === 'raw') {
-          @if (inventoryService.rawMaterialsWithStatus().length === 0) {
-            <div class="text-center py-8 text-gray-400">No raw material inventory data yet.</div>
-          } @else {
-            <div class="overflow-x-auto">
-              <table class="min-w-full divide-y divide-gray-200 text-sm">
-                <thead class="bg-gray-50">
-                  <tr>
-                    <th class="px-4 py-3 text-left font-medium text-gray-500">Ingredient</th>
-                    <th class="px-4 py-3 text-right font-medium text-gray-500">Current Qty</th>
-                    <th class="px-4 py-3 text-left font-medium text-gray-500">Unit</th>
-                    <th class="px-4 py-3 text-right font-medium text-gray-500">Low Stock Threshold</th>
-                    <th class="px-4 py-3 text-center font-medium text-gray-500">Status</th>
-                    <th class="px-4 py-3 text-center font-medium text-gray-500">Actions</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-100 bg-white">
-                  @for (rm of inventoryService.rawMaterialsWithStatus(); track rm.ingredient_id) {
-                    <tr [class.bg-amber-50]="rm.status === 'low'" class="hover:bg-gray-50">
-                      <td class="px-4 py-3 font-medium text-gray-900">
-                        {{ rm.ingredient?.name ?? rm.ingredient_id }}
-                      </td>
-                      <td class="px-4 py-3 text-right font-semibold"
-                          [class.text-amber-700]="rm.status === 'low'"
-                          [class.text-gray-900]="rm.status !== 'low'">
-                        {{ rm.current_qty }}
-                      </td>
-                      <td class="px-4 py-3 text-gray-500">{{ rm.unit }}</td>
-                      <td class="px-4 py-3 text-right">
-                        @if (editingThresholdId() === rm.ingredient_id) {
-                          <div class="flex items-center justify-end gap-2">
-                            <input
-                              type="number"
-                              [(ngModel)]="editingThresholdValue"
-                              min="0"
-                              class="w-24 rounded border border-blue-300 px-2 py-1 text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-200" />
-                            <button (click)="saveThreshold(rm.ingredient_id)"
-                              class="text-xs text-green-600 hover:text-green-800 font-semibold">Save</button>
-                            <button (click)="cancelThresholdEdit()"
-                              class="text-xs text-gray-500 hover:text-gray-700">Cancel</button>
-                          </div>
-                        } @else {
-                          <span class="text-gray-700">{{ rm.low_stock_threshold ?? '—' }}</span>
-                        }
-                      </td>
-                      <td class="px-4 py-3 text-center">
-                        <span [class]="rm.status === 'low'
-                          ? 'inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700'
-                          : 'inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-700'">
-                          {{ rm.status === 'low' ? 'LOW' : 'OK' }}
-                        </span>
-                      </td>
-                      <td class="px-4 py-3 text-center">
-                        <button
-                          (click)="startThresholdEdit(rm.ingredient_id, rm.low_stock_threshold)"
-                          class="text-xs text-blue-600 hover:text-blue-800 font-medium border border-blue-200 hover:border-blue-400 px-2 py-1 rounded transition-colors">
-                          Edit Threshold
-                        </button>
-                      </td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            </div>
-          }
-        }
-
-        <!-- FINISHED GOODS TAB -->
-        @if (activeTab() === 'finished') {
-          @if (inventoryService.skuSummaries().length === 0) {
-            <div class="text-center py-8 text-gray-400">No finished goods inventory data yet.</div>
-          } @else {
-            <div class="space-y-6">
-              @for (summary of inventoryService.skuSummaries(); track summary.sku_id) {
-                <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                  <!-- SKU header with subtotals -->
-                  <div class="px-5 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
-                    <div>
-                      <span class="font-semibold text-gray-900">{{ summary.sku_name }}</span>
-                      <span class="ml-2 text-xs font-mono text-gray-400">{{ summary.sku_code }}</span>
+        <!-- Table -->
+        <div style="background:#fff;border-radius:12px;border:1px solid #E5E7EB;overflow:hidden;">
+          <table style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="background:#f8f9fa;border-bottom:1px solid #E5E7EB;">
+                <th style="text-align:left;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Ingredient</th>
+                <th style="text-align:right;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Current Stock</th>
+                <th style="text-align:right;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Reorder Point</th>
+                <th style="text-align:center;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Status</th>
+                <th style="text-align:center;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (item of filtered(); track item.id) {
+                <tr [style.background]="item.isLow ? '#fff5f5' : '#fff'" style="border-bottom:1px solid #f3f4f6;transition:background 0.1s;">
+                  <td style="padding:12px 16px;">
+                    <div style="display:flex;align-items:center;gap:10px;">
+                      <div [style.background]="item.isLow ? '#fee2e2' : '#dcfce7'" style="width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;">
+                        <span class="material-icons-round" [style.color]="item.isLow ? '#dc2626' : '#15803d'" style="font-size:16px;">category</span>
+                      </div>
+                      <span style="font-size:14px;font-weight:600;color:#121212;">{{ item.name }}</span>
                     </div>
-                    <div class="flex items-center gap-4 text-sm">
-                      <span class="text-gray-500">Total available:</span>
-                      <span class="font-bold text-gray-900">{{ summary.net_available }} boxes</span>
-                      @if (summary.total_returned > 0) {
-                        <span class="text-xs text-amber-600">({{ summary.total_returned }} returned)</span>
-                      }
-                    </div>
-                  </div>
-
-                  <!-- Per-batch rows -->
-                  <table class="min-w-full text-sm">
-                    <thead>
-                      <tr class="text-xs font-medium text-gray-400 uppercase tracking-wide">
-                        <th class="px-5 py-2 text-left">Batch Code</th>
-                        <th class="px-5 py-2 text-left">Production Date</th>
-                        <th class="px-5 py-2 text-right">Available Boxes</th>
-                        <th class="px-5 py-2 text-right">Returned Boxes</th>
-                      </tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-50">
-                      @for (batch of summary.batches; track batch.batch_code) {
-                        <tr class="hover:bg-gray-50">
-                          <td class="px-5 py-2.5 font-mono text-xs text-gray-700">{{ batch.batch_code }}</td>
-                          <td class="px-5 py-2.5 text-gray-600">{{ batch.batch?.production_date ?? '—' }}</td>
-                          <td class="px-5 py-2.5 text-right font-semibold text-gray-900">{{ batch.boxes_available }}</td>
-                          <td class="px-5 py-2.5 text-right text-gray-500">{{ batch.boxes_returned ?? 0 }}</td>
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
-                </div>
+                  </td>
+                  <td style="padding:12px 16px;text-align:right;">
+                    @if (editingId() === item.id) {
+                      <input [(ngModel)]="editStock" type="number" min="0" step="0.01" class="gg-input" style="width:100px;font-size:13px;padding:4px 8px;" (keyup.enter)="saveStock(item)">
+                    } @else {
+                      <span style="font-size:14px;font-weight:600;" [style.color]="item.isLow ? '#dc2626' : '#121212'">
+                        {{ item.current_stock | number:'1.0-2' }} {{ item.default_unit }}
+                      </span>
+                    }
+                  </td>
+                  <td style="padding:12px 16px;text-align:right;">
+                    @if (editingId() === item.id) {
+                      <input [(ngModel)]="editReorder" type="number" min="0" step="0.01" class="gg-input" style="width:100px;font-size:13px;padding:4px 8px;">
+                    } @else {
+                      <span style="font-size:13px;color:#6B7280;">{{ item.reorder_point | number:'1.0-2' }} {{ item.default_unit }}</span>
+                    }
+                  </td>
+                  <td style="padding:12px 16px;text-align:center;">
+                    @if (item.isLow) {
+                      <span style="display:inline-flex;align-items:center;gap:4px;background:#fee2e2;color:#dc2626;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;">
+                        <span class="material-icons-round" style="font-size:12px;">warning</span> Low
+                      </span>
+                    } @else {
+                      <span style="display:inline-flex;align-items:center;gap:4px;background:#dcfce7;color:#15803d;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;">
+                        <span class="material-icons-round" style="font-size:12px;">check_circle</span> OK
+                      </span>
+                    }
+                  </td>
+                  <td style="padding:12px 16px;text-align:center;">
+                    @if (editingId() === item.id) {
+                      <div style="display:flex;align-items:center;justify-content:center;gap:6px;">
+                        <button (click)="saveStock(item)" style="padding:4px 10px;background:#01AC51;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">Save</button>
+                        <button (click)="editingId.set(null)" style="padding:4px 10px;background:#f3f4f6;border:1px solid #E5E7EB;border-radius:6px;font-size:12px;cursor:pointer;color:#374151;">Cancel</button>
+                      </div>
+                    } @else {
+                      <button (click)="startEdit(item)" style="padding:4px 10px;background:#f0fdf4;border:1px solid #01AC51;color:#01AC51;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">Edit Stock</button>
+                    }
+                  </td>
+                </tr>
               }
-            </div>
-          }
-        }
-
+            </tbody>
+          </table>
+        </div>
       }
     </div>
+
+    <style>
+      @media (max-width:600px) { .inv-stats { grid-template-columns: 1fr 1fr !important; } }
+    </style>
   `,
 })
 export class InventoryComponent implements OnInit {
-  inventoryService = inject(InventoryService);
+  private readonly supabase = inject(SupabaseService);
 
-  readonly activeTab = signal<'raw' | 'finished'>('raw');
-  readonly editingThresholdId = signal<string | null>(null);
-  editingThresholdValue: number | null = null;
+  loading = signal(true);
+  items = signal<IngredientStock[]>([]);
+  editingId = signal<string | null>(null);
+  editStock = 0;
+  editReorder = 0;
+  searchTerm = '';
+  filter = 'all';
+  toast = signal('');
+  toastKind = signal<'success'|'error'>('success');
+  filteredItems = signal<IngredientStock[]>([]);
 
-  readonly lowStockCount = computed(() =>
-    this.inventoryService.rawMaterialsWithStatus().filter(r => r.status === 'low').length
-  );
+  lowCount = computed(() => this.items().filter(i => i.isLow).length);
+  okCount = computed(() => this.items().filter(i => !i.isLow).length);
 
-  ngOnInit(): void {
-    this.inventoryService.load();
-    this.inventoryService.subscribeRealtime();
+  filtered = computed(() => this.filteredItems());
+
+  onFilterChange(): void {
+    let list = this.items();
+    if (this.searchTerm) list = list.filter(i => i.name.toLowerCase().includes(this.searchTerm.toLowerCase()));
+    if (this.filter === 'low') list = list.filter(i => i.isLow);
+    if (this.filter === 'ok') list = list.filter(i => !i.isLow);
+    this.filteredItems.set(list);
   }
 
-  startThresholdEdit(ingredientId: string, currentThreshold: number | null): void {
-    this.editingThresholdId.set(ingredientId);
-    this.editingThresholdValue = currentThreshold;
+  async ngOnInit(): Promise<void> { await this.loadData(); }
+
+  async loadData(): Promise<void> {
+    this.loading.set(true);
+    const { data } = await this.supabase.client.from('gg_ingredients')
+      .select('id, name, current_stock, reorder_point, default_unit')
+      .order('name');
+    const mapped = (data ?? []).map((i: any) => ({
+      id: i.id, name: i.name,
+      current_stock: i.current_stock ?? 0, reorder_point: i.reorder_point ?? 0,
+      default_unit: i.default_unit ?? 'kg',
+      isLow: (i.current_stock ?? 0) <= (i.reorder_point ?? 0),
+    }));
+    this.items.set(mapped);
+    this.filteredItems.set(mapped);
+    this.loading.set(false);
   }
 
-  cancelThresholdEdit(): void {
-    this.editingThresholdId.set(null);
-    this.editingThresholdValue = null;
+  startEdit(item: IngredientStock): void {
+    this.editingId.set(item.id);
+    this.editStock = item.current_stock;
+    this.editReorder = item.reorder_point;
   }
 
-  async saveThreshold(ingredientId: string): Promise<void> {
-    await this.inventoryService.updateLowStockThreshold(ingredientId, this.editingThresholdValue);
-    this.editingThresholdId.set(null);
-    this.editingThresholdValue = null;
+  async saveStock(item: IngredientStock): Promise<void> {
+    const { error } = await this.supabase.client.from('gg_ingredients')
+      .update({ current_stock: this.editStock, reorder_point: this.editReorder }).eq('id', item.id);
+    if (!error) { this.showToast('Stock updated', 'success'); this.editingId.set(null); await this.loadData(); }
+    else this.showToast(error.message, 'error');
+  }
+
+  private showToast(msg: string, kind: 'success'|'error'): void {
+    this.toast.set(msg); this.toastKind.set(kind);
+    setTimeout(() => this.toast.set(''), 3000);
   }
 }

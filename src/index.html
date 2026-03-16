@@ -2,41 +2,40 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Gud Gum — Manufacturing Operations</title>
+  <title>Gud Gum — Production Ops</title>
   <base href="/">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cabin:wght@400;500;600;700&family=Figtree:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round|Material+Icons+Outlined" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script>
   tailwind.config = {
-    darkMode: "class",
     theme: {
       extend: {
         colors: {
-          primary: "#2563EB",
-          "primary-hover": "#1D4ED8",
-          "background-light": "#F3F4F6",
-          "background-dark": "#111827",
-          "surface-light": "#FFFFFF",
-          "surface-dark": "#1F2937",
-          "border-light": "#E5E7EB",
-          "border-dark": "#374151",
-          "text-main-light": "#111827",
-          "text-main-dark": "#F9FAFB",
-          "text-sub-light": "#6B7280",
-          "text-sub-dark": "#9CA3AF",
+          gg: {
+            green: "#01AC51",
+            red: "#FF2828",
+            sidebar: "#1a1a2e",
+            bg: "#f8f9fa",
+            text: "#121212",
+            "text-sub": "#6B7280",
+          }
         },
-        fontFamily: { display: ["Inter", "sans-serif"], body: ["Inter", "sans-serif"] },
+        fontFamily: {
+          cabin: ["Cabin", "sans-serif"],
+          figtree: ["Figtree", "sans-serif"],
+        },
       },
     },
   };
   </script>
 </head>
-<body>
+<body class="font-figtree">
   <app-root></app-root>
 </body>
 </html>

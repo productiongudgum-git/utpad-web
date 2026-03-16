@@ -1,5 +1,5 @@
 import { Component, inject, signal } from '@angular/core';
-import { RouterLink, RouterLinkActive, RouterOutlet, Router } from '@angular/router';
+import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { AuthService } from '../../core/auth/auth.service';
 
@@ -13,139 +13,125 @@ interface NavItem {
   selector: 'app-dashboard-shell',
   standalone: true,
   imports: [CommonModule, RouterLink, RouterLinkActive, RouterOutlet],
+  styles: [`
+    .nav-item { display:flex;align-items:center;gap:10px;padding:9px 14px;border-radius:8px;text-decoration:none;color:rgba(255,255,255,0.65);font-size:14px;font-weight:500;cursor:pointer;transition:all 0.15s;white-space:nowrap;overflow:hidden; }
+    .nav-item:hover { background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.9); }
+    .nav-item.active { background:#01AC51;color:#fff; }
+    .nav-item .mat-icon { font-size:20px;width:20px;height:20px;flex-shrink:0; }
+  `],
   template: `
-    <div class="min-h-screen flex bg-background-light dark:bg-background-dark transition-colors duration-200">
-      <!-- Desktop Sidebar -->
-      <aside class="hidden md:flex md:flex-col md:w-64 bg-surface-light dark:bg-surface-dark border-r border-border-light dark:border-border-dark">
-        <!-- Logo -->
-        <div class="px-6 py-5 border-b border-border-light dark:border-border-dark">
-          <div class="flex items-center space-x-3 justify-center">
-            <img src="gudgum-logo.webp" alt="Gud Gum" class="h-10 w-auto object-contain dark:invert">
+    <div style="display:flex;min-height:100vh;background:#f8f9fa;">
+
+      <!-- ── SIDEBAR ───────────────────────────────────── -->
+      <aside style="width:220px;min-height:100vh;background:#1a1a2e;display:flex;flex-direction:column;flex-shrink:0;position:fixed;top:0;left:0;z-index:30;"
+             [style.left]="sidebarOpen() ? '0' : '-220px'"
+             [style.transition]="'left 0.25s ease'"
+             class="sidebar-panel">
+
+        <!-- Brand -->
+        <div style="padding:20px 16px 16px;border-bottom:1px solid rgba(255,255,255,0.07);">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="width:38px;height:38px;background:#01AC51;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <span style="color:#fff;font-family:'Cabin',sans-serif;font-weight:700;font-size:14px;">GG</span>
+            </div>
+            <div>
+              <p style="color:#fff;font-family:'Cabin',sans-serif;font-weight:700;font-size:15px;margin:0;line-height:1.2;">Gud Gum</p>
+              <p style="color:rgba(255,255,255,0.45);font-size:10px;margin:0;letter-spacing:1.5px;text-transform:uppercase;">Production Ops</p>
+            </div>
           </div>
         </div>
 
-        <!-- Nav Links -->
-        <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+        <!-- Nav -->
+        <nav style="flex:1;padding:12px 10px;overflow-y:auto;">
           @for (item of navItems; track item.route) {
-            <a [routerLink]="item.route"
-               routerLinkActive="bg-primary/10 text-primary dark:text-primary font-semibold"
-               class="flex items-center space-x-3 px-3 py-2.5 rounded-lg text-text-sub-light dark:text-text-sub-dark hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-sm">
-              <span class="material-icons-round text-xl">{{ item.icon }}</span>
+            <a [routerLink]="item.route" routerLinkActive="active" class="nav-item" style="margin-bottom:2px;">
+              <span class="material-icons-round mat-icon">{{ item.icon }}</span>
               <span>{{ item.label }}</span>
             </a>
           }
         </nav>
 
-        <!-- User info + logout -->
-        <div class="px-4 py-4 border-t border-border-light dark:border-border-dark">
-          <div class="flex items-center space-x-3">
-            <div class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
-              <span class="text-primary text-sm font-bold">{{ userInitial() }}</span>
+        <!-- User + Logout -->
+        <div style="padding:14px 10px;border-top:1px solid rgba(255,255,255,0.07);">
+          <div style="display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px;background:rgba(255,255,255,0.05);margin-bottom:8px;">
+            <div style="width:30px;height:30px;background:#01AC51;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <span style="color:#fff;font-size:12px;font-weight:700;">{{ userInitial() }}</span>
             </div>
-            <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-text-main-light dark:text-text-main-dark truncate">{{ userName() }}</p>
-              <p class="text-xs text-text-sub-light dark:text-text-sub-dark">{{ userRole() }}</p>
+            <div style="flex:1;min-width:0;">
+              <p style="color:#fff;font-size:13px;font-weight:600;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ userName() }}</p>
+              <p style="color:rgba(255,255,255,0.45);font-size:11px;margin:0;">Admin</p>
             </div>
-            <button (click)="onLogout()" class="p-1.5 rounded-lg text-text-sub-light hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors" title="Logout">
-              <span class="material-icons-round text-xl">logout</span>
-            </button>
           </div>
+          <button (click)="logout()" style="width:100%;padding:8px;background:#FF2828;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:opacity 0.15s;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+            <span class="material-icons-round" style="font-size:16px;">logout</span>
+            Log out
+          </button>
         </div>
       </aside>
 
-      <!-- Main Content Area -->
-      <div class="flex-1 flex flex-col min-h-screen">
-        <!-- Top Header (mobile + desktop) -->
-        <header class="bg-surface-light dark:bg-surface-dark border-b border-border-light dark:border-border-dark px-4 py-3 flex items-center justify-between sticky top-0 z-10">
-          <div class="flex items-center space-x-3 md:hidden">
-            <img src="gudgum-logo.webp" alt="Gud Gum" class="h-8 w-auto object-contain dark:invert">
-          </div>
-          <div class="hidden md:block"></div>
-          <div class="flex items-center space-x-3">
-            <!-- Online indicator -->
-            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
-              <span class="w-1.5 h-1.5 bg-green-500 rounded-full mr-1"></span>
-              Online
-            </span>
-            <!-- Dark mode toggle -->
-            <button (click)="toggleDarkMode()" class="p-2 rounded-lg text-text-sub-light dark:text-text-sub-dark hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
-              <span class="material-icons-round text-xl" [class.hidden]="isDark()">dark_mode</span>
-              <span class="material-icons-round text-xl" [class.hidden]="!isDark()">light_mode</span>
-            </button>
-            <!-- User badge (desktop) -->
-            <div class="hidden md:flex items-center space-x-2">
-              <span class="text-sm font-medium text-text-main-light dark:text-text-main-dark">{{ userName() }}</span>
-              <span class="px-2 py-0.5 text-[10px] font-semibold rounded bg-primary/10 text-primary">{{ userRole() }}</span>
+      <!-- Sidebar overlay (mobile) -->
+      @if (sidebarOpen() && isMobile()) {
+        <div style="position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:29;" (click)="sidebarOpen.set(false)"></div>
+      }
+
+      <!-- ── MAIN CONTENT ────────────────────────────── -->
+      <div style="flex:1;display:flex;flex-direction:column;margin-left:220px;" [style.marginLeft]="isMobile() ? '0' : '220px'">
+
+        <!-- Top bar (mobile) -->
+        <header style="display:none;background:#1a1a2e;padding:12px 16px;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:20;"
+                [style.display]="isMobile() ? 'flex' : 'none'">
+          <button (click)="toggleSidebar()" style="background:none;border:none;color:#fff;cursor:pointer;display:flex;">
+            <span class="material-icons-round">menu</span>
+          </button>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div style="width:26px;height:26px;background:#01AC51;border-radius:50%;display:flex;align-items:center;justify-content:center;">
+              <span style="color:#fff;font-size:11px;font-weight:700;">GG</span>
             </div>
-            <!-- Logout (mobile) -->
-            <button (click)="onLogout()" class="md:hidden p-2 rounded-lg text-text-sub-light hover:text-red-500 transition-colors">
-              <span class="material-icons-round text-xl">logout</span>
-            </button>
+            <span style="color:#fff;font-family:'Cabin',sans-serif;font-weight:700;font-size:14px;">Gud Gum</span>
           </div>
+          <button (click)="logout()" style="background:none;border:none;color:rgba(255,255,255,0.6);cursor:pointer;display:flex;">
+            <span class="material-icons-round" style="font-size:20px;">logout</span>
+          </button>
         </header>
 
-        <!-- Page Content -->
-        <main class="flex-1 overflow-y-auto pb-20 md:pb-4">
+        <!-- Page content -->
+        <main style="flex:1;overflow-y:auto;">
           <router-outlet />
         </main>
       </div>
-
-      <!-- Mobile Bottom Nav -->
-      <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-surface-light dark:bg-surface-dark border-t border-border-light dark:border-border-dark z-20 pb-safe">
-        <div class="flex justify-around items-center py-2">
-          @for (item of mobileNavItems; track item.route) {
-            <a [routerLink]="item.route"
-               routerLinkActive="text-primary"
-               #rla="routerLinkActive"
-               class="flex flex-col items-center gap-0.5 px-2 py-1 text-text-sub-light dark:text-text-sub-dark transition-colors"
-               [class.text-primary]="rla.isActive">
-              <span class="material-icons-round text-2xl">{{ item.icon }}</span>
-              <span class="text-[10px] font-medium">{{ item.label }}</span>
-            </a>
-          }
-        </div>
-      </nav>
     </div>
   `,
 })
 export class DashboardShellComponent {
   private readonly authService = inject(AuthService);
-  private readonly router = inject(Router);
 
-  isDark = signal(false);
+  sidebarOpen = signal(true);
 
   navItems: NavItem[] = [
-    { label: 'Kanban Board', icon: 'view_kanban', route: 'kanban' },
-    { label: 'Recipes', icon: 'science', route: 'recipes' },
-    { label: 'Inventory', icon: 'warehouse', route: 'inventory' },
-    { label: 'Reports', icon: 'bar_chart', route: 'reports' },
-    { label: 'Traceability', icon: 'account_tree', route: 'traceability' },
-    { label: 'Alerts', icon: 'notifications_active', route: 'alerts' },
-    { label: 'Ingredients & Vendors', icon: 'category', route: 'ingredients' },
-    { label: 'Users', icon: 'group', route: 'users' },
+    { label: 'Dashboard',   icon: 'dashboard',          route: 'home' },
+    { label: 'Live Kanban', icon: 'view_kanban',         route: 'kanban' },
+    { label: 'Recipes',     icon: 'science',             route: 'recipes' },
+    { label: 'Inventory',   icon: 'inventory_2',         route: 'inventory' },
+    { label: 'Ingredients', icon: 'category',            route: 'ingredients' },
+    { label: 'Flavors',     icon: 'local_dining',        route: 'flavors' },
+    { label: 'Vendors',     icon: 'storefront',          route: 'vendors' },
+    { label: 'Customers',   icon: 'people',              route: 'customers' },
+    { label: 'Team',        icon: 'group',               route: 'team' },
+    { label: 'History',     icon: 'history',             route: 'history' },
   ];
 
-  mobileNavItems: NavItem[] = [
-    { label: 'Kanban', icon: 'view_kanban', route: 'kanban' },
-    { label: 'Inventory', icon: 'warehouse', route: 'inventory' },
-    { label: 'Alerts', icon: 'notifications_active', route: 'alerts' },
-    { label: 'Reports', icon: 'bar_chart', route: 'reports' },
-    { label: 'Users', icon: 'group', route: 'users' },
-  ];
+  userName = () => this.authService.currentUser()?.name ?? 'Admin User';
+  userInitial = () => (this.authService.currentUser()?.name ?? 'A').charAt(0).toUpperCase();
 
-  userName = () => this.authService.currentUser()?.name ?? 'User';
-  userRole = () => this.authService.currentUser()?.role ?? 'Operator';
-  userInitial = () => (this.authService.currentUser()?.name ?? 'U').charAt(0).toUpperCase();
-
-  toggleDarkMode(): void {
-    this.isDark.update(v => !v);
-    document.documentElement.classList.toggle('dark');
+  isMobile(): boolean {
+    return window.innerWidth < 768;
   }
 
-  onLogout(): void {
-    this.authService.logout().subscribe({
-      next: () => this.router.navigate(['/auth/login']),
-      error: () => this.router.navigate(['/auth/login']),
-    });
+  toggleSidebar(): void {
+    this.sidebarOpen.update(v => !v);
+  }
+
+  logout(): void {
+    this.authService.logout();
   }
 }

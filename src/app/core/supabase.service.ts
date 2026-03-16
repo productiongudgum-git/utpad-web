@@ -1,33 +1,15 @@
 import { Injectable } from '@angular/core';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { environment } from '../../environments/environment';
-import { TokenService } from './auth/token.service';
 
-@Injectable({
-  providedIn: 'root'
-})
+@Injectable({ providedIn: 'root' })
 export class SupabaseService {
-  public client: SupabaseClient;
+  public readonly client: SupabaseClient;
 
-  constructor(private readonly tokenService: TokenService) {
+  constructor() {
     this.client = createClient(
-      environment.supabase.apiUrl,
-      environment.supabase.publishableKey,
+      'https://zoemonbualktnxhpbebv.supabase.co',
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpvZW1vbmJ1YWxrdG54aHBiZWJ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI3OTU1NDksImV4cCI6MjA4ODM3MTU0OX0.ZH8Brq0SGn7KY-VzCupsjMNf_OSOlyY4GwXr42yBu3c',
       { auth: { persistSession: false } }
     );
-    // Restore session on page refresh — TokenService has already read tokens
-    // from sessionStorage by the time this constructor runs.
-    this.restoreSession();
-  }
-
-  private restoreSession(): void {
-    const accessToken = this.tokenService.getAccessToken();
-    const refreshToken = this.tokenService.getRefreshToken();
-    if (accessToken && refreshToken) {
-      void this.client.auth.setSession({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-      });
-    }
   }
 }

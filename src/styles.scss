@@ -1,25 +1,163 @@
-body { font-family: 'Inter', sans-serif; }
-* { box-sizing: border-box; }
-
 :root {
-  --dropdown-arrow-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M6 8l4 4 4-4' stroke='%2364748b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --gg-green: #01AC51;
+  --gg-red: #FF2828;
+  --gg-sidebar: #1a1a2e;
+  --gg-bg: #f8f9fa;
+  --gg-text: #121212;
+  --gg-text-sub: #6B7280;
+  --gg-border: #E5E7EB;
+  --gg-card: #ffffff;
 }
 
-.dark {
-  --dropdown-arrow-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M6 8l4 4 4-4' stroke='%2394a3b8' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+* { box-sizing: border-box; }
+
+body {
+  font-family: 'Figtree', sans-serif;
+  background: var(--gg-bg);
+  color: var(--gg-text);
+  margin: 0;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Cabin', sans-serif;
+}
+
+.gg-sidebar {
+  background: var(--gg-sidebar);
+  width: 220px;
+  min-height: 100vh;
+  flex-shrink: 0;
+}
+
+.gg-card {
+  background: var(--gg-card);
+  border-radius: 12px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  border: 1px solid var(--gg-border);
+}
+
+.gg-btn-primary {
+  background: var(--gg-green);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.gg-btn-primary:hover { opacity: 0.9; }
+.gg-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.gg-btn-danger {
+  background: var(--gg-red);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.gg-input {
+  width: 100%;
+  border: 1px solid var(--gg-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+  font-family: 'Figtree', sans-serif;
+  outline: none;
+  background: #fff;
+  transition: border-color 0.15s;
+}
+
+.gg-input:focus {
+  border-color: var(--gg-green);
+  box-shadow: 0 0 0 3px rgba(1,172,81,0.12);
 }
 
 select.dropdown-with-arrow {
   appearance: none;
   -webkit-appearance: none;
-  -moz-appearance: none;
-  background-image: var(--dropdown-arrow-icon);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M6 8l4 4 4-4' stroke='%236B7280' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 0.875rem center;
   background-size: 1rem 1rem;
   padding-right: 2.5rem;
 }
 
-select.dropdown-with-arrow::-ms-expand {
-  display: none;
+.gg-badge-green {
+  background: #dcfce7;
+  color: #15803d;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.gg-badge-red {
+  background: #fee2e2;
+  color: #dc2626;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.gg-badge-blue {
+  background: #dbeafe;
+  color: #2563eb;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.gg-skeleton {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 8px;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  padding: 12px 20px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  animation: slideUp 0.2s ease;
+}
+
+.toast-success { background: var(--gg-green); color: #fff; }
+.toast-error { background: var(--gg-red); color: #fff; }
+
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }

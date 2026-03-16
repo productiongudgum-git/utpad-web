@@ -1,162 +1,138 @@
-import { Component, computed, inject } from '@angular/core';
-import { CommonModule, DatePipe, TitleCasePipe } from '@angular/common';
-import { OperationsLiveService, OperationEvent } from '../../../core/services/operations-live.service';
+import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import { CommonModule, DatePipe } from '@angular/common';
+import { SupabaseService } from '../../../core/supabase.service';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
-interface KanbanColumn {
-    id: string;
-    title: string;
-    module: string;
-    icon: string;
-    color: string;
-    bgColor: string;
-    events: OperationEvent[];
+interface Batch {
+  id: string;
+  batch_code: string;
+  status: string;
+  created_at: string;
+  flavor_name: string;
 }
 
 @Component({
-    selector: 'app-kanban',
-    standalone: true,
-    imports: [CommonModule, DatePipe, TitleCasePipe],
-    template: `
-    <section class="p-4 md:p-6 space-y-6">
-      <header class="bg-surface-light dark:bg-surface-dark rounded-2xl border border-border-light dark:border-border-dark p-5 md:p-6">
-        <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-          <div>
-            <p class="text-xs uppercase tracking-widest text-text-sub-light dark:text-text-sub-dark font-semibold">Production Pipeline</p>
-            <h1 class="text-2xl md:text-3xl font-bold text-text-main-light dark:text-text-main-dark">Kanban Board</h1>
-            <p class="mt-1 text-sm text-text-sub-light dark:text-text-sub-dark">
-              Visualize every batch flowing through your production pipeline in real time.
-            </p>
-          </div>
-          <div class="flex items-center gap-3">
-            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
-              <span class="w-2 h-2 bg-green-500 rounded-full mr-1.5 animate-pulse"></span>
-              Live
-            </span>
-            <span class="text-sm text-text-sub-light dark:text-text-sub-dark">
-              {{ totalEvents() }} total events
-            </span>
-          </div>
-        </div>
-      </header>
+  selector: 'app-kanban',
+  standalone: true,
+  imports: [CommonModule, DatePipe],
+  template: `
+    <div style="padding:24px;">
+      <div style="margin-bottom:24px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <h1 style="font-family:'Cabin',sans-serif;font-size:22px;font-weight:700;color:#121212;margin:0;">Live Kanban</h1>
+        <span style="display:flex;align-items:center;gap:5px;padding:4px 10px;background:#dcfce7;border-radius:999px;font-size:12px;font-weight:600;color:#15803d;">
+          <span style="width:6px;height:6px;background:#01AC51;border-radius:50%;display:inline-block;animation:blink 1.5s infinite;"></span>
+          Live
+        </span>
+        @if (loading()) {
+          <span style="font-size:13px;color:#6B7280;">Refreshing...</span>
+        }
+      </div>
 
-      <!-- Kanban Columns -->
-      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        @for (column of columns(); track column.id) {
-          <div class="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-light dark:border-border-dark flex flex-col">
-            <!-- Column Header -->
-            <div class="px-4 py-3 border-b border-border-light dark:border-border-dark flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <span class="material-icons-round text-lg" [style.color]="column.color">{{ column.icon }}</span>
-                <h3 class="font-semibold text-sm text-text-main-light dark:text-text-main-dark">{{ column.title }}</h3>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;" class="kanban-grid">
+        @for (col of columns; track col.status) {
+          <div>
+            <!-- Column header -->
+            <div [style.borderTopColor]="col.color" style="background:#fff;border-radius:10px 10px 0 0;border:1px solid #E5E7EB;border-top:3px solid;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span class="material-icons-round" [style.color]="col.color" style="font-size:18px;">{{ col.icon }}</span>
+                <span style="font-size:13px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:0.5px;">{{ col.label }}</span>
               </div>
-              <span class="inline-flex items-center justify-center min-w-[24px] h-6 px-1.5 rounded-full text-xs font-bold"
-                    [style.backgroundColor]="column.bgColor"
-                    [style.color]="column.color">
-                {{ column.events.length }}
+              <span [style.background]="col.color + '22'" [style.color]="col.color" style="padding:2px 8px;border-radius:999px;font-size:12px;font-weight:700;">
+                {{ getBatches(col.status).length }}
               </span>
             </div>
 
-            <!-- Column Cards -->
-            <div class="flex-1 p-3 space-y-2 max-h-[480px] overflow-y-auto">
-              @if (column.events.length === 0) {
-                <div class="text-center py-8 text-sm text-text-sub-light dark:text-text-sub-dark">
-                  No batches in this stage
+            <!-- Cards -->
+            <div style="background:#f8f9fa;border:1px solid #E5E7EB;border-top:none;border-radius:0 0 10px 10px;padding:10px;min-height:200px;max-height:500px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;">
+              @if (getBatches(col.status).length === 0) {
+                <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:32px 0;text-align:center;">
+                  <div>
+                    <span class="material-icons-round" style="font-size:28px;color:#d1d5db;display:block;margin-bottom:6px;">inbox</span>
+                    <p style="font-size:12px;color:#9CA3AF;margin:0;">No batches</p>
+                  </div>
                 </div>
               }
-              @for (event of column.events; track event.id) {
-                <div class="p-3 rounded-lg border border-border-light dark:border-border-dark bg-background-light dark:bg-background-dark hover:shadow-md transition-shadow cursor-default">
-                  <div class="flex items-start justify-between gap-2">
-                    <p class="font-medium text-sm text-text-main-light dark:text-text-main-dark line-clamp-1">{{ event.summary }}</p>
-                  </div>
-                  <div class="mt-2 flex flex-wrap gap-1.5">
-                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 dark:bg-gray-800 text-text-sub-light dark:text-text-sub-dark">
-                      {{ event.batchCode }}
-                    </span>
-                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400">
-                      {{ event.quantity }} {{ event.unit }}
+              @for (batch of getBatches(col.status); track batch.id) {
+                <div style="background:#fff;border-radius:8px;border:1px solid #E5E7EB;padding:12px;box-shadow:0 1px 2px rgba(0,0,0,0.04);">
+                  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px;">
+                    <span style="font-size:13px;font-weight:700;color:#121212;font-family:'Cabin',sans-serif;">{{ batch.batch_code }}</span>
+                    <span [style.background]="col.color + '22'" [style.color]="col.color" style="font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap;">
+                      {{ col.label }}
                     </span>
                   </div>
-                  <div class="mt-2 flex items-center justify-between text-[10px] text-text-sub-light dark:text-text-sub-dark">
-                    <span>{{ event.workerName }}</span>
-                    <span>{{ event.createdAt | date:'shortTime' }}</span>
-                  </div>
+                  <p style="font-size:12px;color:#6B7280;margin:0 0 6px;">{{ batch.flavor_name }}</p>
+                  <p style="font-size:11px;color:#9CA3AF;margin:0;">{{ batch.created_at | date:'MMM d, h:mm a' }}</p>
                 </div>
               }
             </div>
           </div>
         }
       </div>
+    </div>
 
-      <!-- Pipeline Summary -->
-      <div class="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-light dark:border-border-dark p-4">
-        <h3 class="text-sm font-semibold text-text-main-light dark:text-text-main-dark mb-3">Pipeline Flow Summary</h3>
-        <div class="flex items-center justify-between gap-2 overflow-x-auto">
-          @for (column of columns(); track column.id; let last = $last) {
-            <div class="flex-1 min-w-[100px] text-center">
-              <div class="text-2xl font-bold" [style.color]="column.color">{{ column.events.length }}</div>
-              <div class="text-xs text-text-sub-light dark:text-text-sub-dark mt-0.5">{{ column.title }}</div>
-            </div>
-            @if (!last) {
-              <span class="material-icons-round text-gray-300 dark:text-gray-600 text-xl flex-shrink-0">arrow_forward</span>
-            }
-          }
-        </div>
-      </div>
-    </section>
+    <style>
+      @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+      @media (max-width:900px) { .kanban-grid { grid-template-columns: repeat(2,1fr) !important; } }
+      @media (max-width:500px) { .kanban-grid { grid-template-columns: 1fr !important; } }
+    </style>
   `,
 })
-export class KanbanComponent {
-    private readonly operations = inject(OperationsLiveService);
+export class KanbanComponent implements OnInit, OnDestroy {
+  private readonly supabase = inject(SupabaseService);
 
-    readonly totalEvents = computed(() => this.operations.events().length);
+  loading = signal(false);
+  batches = signal<Batch[]>([]);
 
-    readonly columns = computed<KanbanColumn[]>(() => {
-        const events = this.operations.events();
+  columns = [
+    { status: 'production', label: 'Production', color: '#2563eb', icon: 'precision_manufacturing' },
+    { status: 'packing',    label: 'Packing',    color: '#d97706', icon: 'inventory_2' },
+    { status: 'dispatch',   label: 'Dispatch',   color: '#01AC51', icon: 'local_shipping' },
+    { status: 'completed',  label: 'Completed',  color: '#6B7280', icon: 'check_circle' },
+  ];
 
-        const grouped = {
-            inwarding: events.filter(e => e.module === 'inwarding').slice(0, 20),
-            production: events.filter(e => e.module === 'production').slice(0, 20),
-            packing: events.filter(e => e.module === 'packing').slice(0, 20),
-            dispatch: events.filter(e => e.module === 'dispatch').slice(0, 20),
-        };
+  private channel: RealtimeChannel | null = null;
 
-        return [
-            {
-                id: 'inwarding',
-                title: 'Inwarded',
-                module: 'inwarding',
-                icon: 'inventory',
-                color: '#6366f1',
-                bgColor: '#eef2ff',
-                events: grouped.inwarding,
-            },
-            {
-                id: 'production',
-                title: 'In Production',
-                module: 'production',
-                icon: 'precision_manufacturing',
-                color: '#f59e0b',
-                bgColor: '#fffbeb',
-                events: grouped.production,
-            },
-            {
-                id: 'packing',
-                title: 'Packed',
-                module: 'packing',
-                icon: 'inventory_2',
-                color: '#10b981',
-                bgColor: '#ecfdf5',
-                events: grouped.packing,
-            },
-            {
-                id: 'dispatch',
-                title: 'Dispatched',
-                module: 'dispatch',
-                icon: 'local_shipping',
-                color: '#3b82f6',
-                bgColor: '#eff6ff',
-                events: grouped.dispatch,
-            },
-        ];
-    });
+  async ngOnInit(): Promise<void> {
+    await this.loadBatches();
+    this.subscribeRealtime();
+  }
+
+  ngOnDestroy(): void {
+    if (this.channel) {
+      void this.supabase.client.removeChannel(this.channel);
+    }
+  }
+
+  getBatches(status: string): Batch[] {
+    return this.batches().filter(b => b.status === status);
+  }
+
+  private async loadBatches(): Promise<void> {
+    this.loading.set(true);
+    const { data, error } = await this.supabase.client
+      .from('gg_batches')
+      .select('id, batch_code, status, created_at, gg_flavors(name)')
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (!error && data) {
+      this.batches.set(data.map((b: any) => ({
+        id: b.id,
+        batch_code: b.batch_code,
+        status: b.status,
+        created_at: b.created_at,
+        flavor_name: b.gg_flavors?.name ?? 'Unknown',
+      })));
+    }
+    this.loading.set(false);
+  }
+
+  private subscribeRealtime(): void {
+    this.channel = this.supabase.client
+      .channel('gg-kanban')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'gg_batches' }, () => {
+        void this.loadBatches();
+      })
+      .subscribe();
+  }
 }
