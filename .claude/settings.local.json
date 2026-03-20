@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\\\.ts$\")",
+      "Bash(npx ng:*)",
+      "Bash(node_modules/.bin/ng build:*)",
+      "Bash(ng --version)"
+    ]
+  }
+}

@@ -2,6 +2,7 @@ import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
 import { CommonModule, DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SupabaseService } from '../../../core/supabase.service';
+import { BatchCodeService } from '../../../core/services/batch-code.service';
 
 declare const Chart: any;
 
@@ -44,6 +45,25 @@ interface BatchHistory {
         </div>
       </div>
 
+      <!-- Batch Code Banner -->
+      <div style="display:flex;align-items:center;gap:12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:12px 16px;margin-bottom:16px;flex-wrap:wrap;">
+        <span style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Today's Batch Code</span>
+        @if (batchCodeSvc.loading()) {
+          <span style="font-size:14px;color:#9CA3AF;font-style:italic;">Loading…</span>
+        } @else if (batchCodeSvc.batchCode()) {
+          <span style="font-family:monospace;font-size:16px;font-weight:700;color:#15803d;letter-spacing:1.5px;">{{ batchCodeSvc.batchCode() }}</span>
+          @if (batchCodeSvc.batchDate()) {
+            <span style="font-size:12px;color:#6B7280;">{{ batchCodeSvc.batchDate() }}</span>
+          }
+          <button (click)="filterByTodaysBatch()" style="margin-left:auto;padding:6px 14px;background:#01AC51;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;">
+            <span class="material-icons-round" style="font-size:15px;">filter_list</span>
+            Show today's batches
+          </button>
+        } @else {
+          <span style="font-size:13px;color:#9CA3AF;">Batch code unavailable</span>
+        }
+      </div>
+
       <!-- Filters -->
       <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;align-items:center;">
         <input [(ngModel)]="searchTerm" placeholder="Search batch code or flavor..." class="gg-input" style="max-width:260px;" (ngModelChange)="filterTable()">
@@ -56,6 +76,11 @@ interface BatchHistory {
         </select>
         <input [(ngModel)]="dateFrom" type="date" class="gg-input" style="max-width:160px;" (ngModelChange)="filterTable()">
         <input [(ngModel)]="dateTo" type="date" class="gg-input" style="max-width:160px;" (ngModelChange)="filterTable()">
+        @if (searchTerm || statusFilter || dateFrom || dateTo) {
+          <button (click)="clearFilters()" style="padding:8px 12px;background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:5px;color:#dc2626;">
+            <span class="material-icons-round" style="font-size:15px;">close</span> Clear
+          </button>
+        }
         <button (click)="exportCSV()" style="padding:8px 16px;background:#f3f4f6;border:1px solid #E5E7EB;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:6px;color:#374151;">
           <span class="material-icons-round" style="font-size:16px;">download</span> Export CSV
         </button>
@@ -80,13 +105,21 @@ interface BatchHistory {
                 <th style="text-align:left;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;">Flavor</th>
                 <th style="text-align:center;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;">Status</th>
                 <th style="text-align:left;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;">Date</th>
-                <th style="text-align:center;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;">Details</th>
+                <th style="text-align:center;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;"></th>
               </tr>
             </thead>
             <tbody>
               @for (b of filtered(); track b.id) {
-                <tr style="border-bottom:1px solid #f3f4f6;cursor:pointer;" (click)="toggleExpand(b.id)">
-                  <td style="padding:12px 16px;font-size:13px;font-weight:700;color:#121212;font-family:'Cabin',sans-serif;">{{ b.batch_code }}</td>
+                <tr style="border-bottom:1px solid #f3f4f6;cursor:pointer;" (click)="toggleExpand(b.id)"
+                    [style.background]="isTodaysBatch(b) ? '#f0fdf4' : 'transparent'">
+                  <td style="padding:12px 16px;">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <span style="font-size:13px;font-weight:700;color:#121212;font-family:'Cabin',sans-serif;">{{ b.batch_code }}</span>
+                      @if (isTodaysBatch(b)) {
+                        <span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:#dcfce7;color:#15803d;text-transform:uppercase;letter-spacing:0.5px;">Today</span>
+                      }
+                    </div>
+                  </td>
                   <td style="padding:12px 16px;font-size:13px;color:#374151;">{{ b.flavor_name }}</td>
                   <td style="padding:12px 16px;text-align:center;">
                     <span [style.background]="statusBg(b.status)" [style.color]="statusColor(b.status)" style="padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;text-transform:capitalize;">{{ b.status }}</span>
@@ -148,6 +181,7 @@ interface BatchHistory {
 })
 export class HistoryComponent implements OnInit, OnDestroy {
   private readonly supabase = inject(SupabaseService);
+  readonly batchCodeSvc = inject(BatchCodeService);
 
   loading = signal(true);
   chartsLoading = signal(true);
@@ -179,6 +213,27 @@ export class HistoryComponent implements OnInit, OnDestroy {
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
+  }
+
+  isTodaysBatch(b: BatchHistory): boolean {
+    const todayCode = this.batchCodeSvc.batchCode();
+    return !!todayCode && b.batch_code === todayCode;
+  }
+
+  filterByTodaysBatch(): void {
+    const code = this.batchCodeSvc.batchCode();
+    if (code) {
+      this.searchTerm = code;
+      this.filterTable();
+    }
+  }
+
+  clearFilters(): void {
+    this.searchTerm = '';
+    this.statusFilter = '';
+    this.dateFrom = '';
+    this.dateTo = '';
+    this.filterTable();
   }
 
   filterTable(): void {

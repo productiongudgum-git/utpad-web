@@ -1,6 +1,8 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
 import { CommonModule, DatePipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { SupabaseService } from '../../../core/supabase.service';
+import { BatchCodeService } from '../../../core/services/batch-code.service';
 
 interface Batch {
   id: string;
@@ -22,12 +24,12 @@ interface KanbanColumn {
 @Component({
   selector: 'app-kanban',
   standalone: true,
-  imports: [CommonModule, DatePipe],
+  imports: [CommonModule, DatePipe, FormsModule],
   template: `
     <div style="padding:24px;">
 
       <!-- Header -->
-      <div style="margin-bottom:24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+      <div style="margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
           <h1 class="font-display" style="font-size:22px;font-weight:700;color:var(--foreground);margin:0;">Live Kanban</h1>
           <span style="display:flex;align-items:center;gap:5px;padding:4px 10px;background:#dcfce7;border-radius:999px;font-size:12px;font-weight:600;color:#15803d;">
@@ -48,6 +50,53 @@ interface KanbanColumn {
         </div>
       </div>
 
+      <!-- Batch Code Filter Bar -->
+      <div style="margin-bottom:20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 16px;">
+        <!-- Today's Batch Code Badge -->
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Today's Batch</span>
+          @if (batchCodeSvc.loading()) {
+            <span style="font-size:13px;color:#9CA3AF;font-style:italic;">Loading…</span>
+          } @else if (batchCodeSvc.batchCode()) {
+            <span style="font-family:monospace;font-size:15px;font-weight:700;color:#01AC51;background:#dcfce7;padding:3px 10px;border-radius:6px;letter-spacing:1px;">
+              {{ batchCodeSvc.batchCode() }}
+            </span>
+          } @else {
+            <span style="font-size:13px;color:#9CA3AF;">Unavailable</span>
+          }
+        </div>
+
+        <div style="height:20px;width:1px;background:var(--border);"></div>
+
+        <!-- Filter toggle -->
+        <div style="display:flex;align-items:center;gap:8px;">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:500;color:#374151;cursor:pointer;">
+            <input type="checkbox" [(ngModel)]="filterByToday" (ngModelChange)="onFilterChange()"
+                   style="width:15px;height:15px;accent-color:#01AC51;cursor:pointer;">
+            Show only today's batches
+          </label>
+        </div>
+
+        <div style="height:20px;width:1px;background:var(--border);"></div>
+
+        <!-- Manual batch code search -->
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="material-icons-round" style="font-size:16px;color:#9CA3AF;">search</span>
+          <input [(ngModel)]="batchCodeFilter" (ngModelChange)="onFilterChange()"
+                 placeholder="Filter by batch code…"
+                 style="border:none;outline:none;font-size:13px;color:var(--foreground);background:transparent;width:180px;">
+          @if (batchCodeFilter) {
+            <button (click)="clearFilter()" style="border:none;background:none;cursor:pointer;color:#9CA3AF;display:flex;align-items:center;">
+              <span class="material-icons-round" style="font-size:16px;">close</span>
+            </button>
+          }
+        </div>
+
+        <div style="margin-left:auto;font-size:12px;color:#6B7280;">
+          {{ totalVisible() }} batch{{ totalVisible() === 1 ? '' : 'es' }} shown
+        </div>
+      </div>
+
       <!-- Kanban Columns -->
       <div class="kanban-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;">
         @for (col of columns; track col.status) {
@@ -61,7 +110,7 @@ interface KanbanColumn {
               </div>
               <span [style.background]="col.color + '22'" [style.color]="col.color"
                     style="padding:2px 10px;border-radius:999px;font-size:12px;font-weight:700;">
-                {{ getBatches(col.status).length }}
+                {{ getFilteredBatches(col.status).length }}
               </span>
             </div>
 
@@ -70,7 +119,7 @@ interface KanbanColumn {
                  style="border:1px solid var(--border);border-top:none;border-radius:0 0 10px 10px;padding:10px;min-height:240px;max-height:520px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;">
 
               <!-- Empty state -->
-              @if (getBatches(col.status).length === 0) {
+              @if (getFilteredBatches(col.status).length === 0) {
                 <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:40px 0;text-align:center;">
                   <div>
                     <span class="material-icons-round" style="font-size:32px;color:#d1d5db;display:block;margin-bottom:8px;">inbox</span>
@@ -80,18 +129,27 @@ interface KanbanColumn {
               }
 
               <!-- Batch cards -->
-              @for (batch of getBatches(col.status); track batch.id) {
+              @for (batch of getFilteredBatches(col.status); track batch.id) {
                 <div style="background:var(--card);border-radius:10px;border:1px solid var(--border);padding:14px;box-shadow:0 1px 3px rgba(0,0,0,0.04);transition:box-shadow 0.15s ease;"
+                     [style.border-color]="isTodaysBatch(batch) ? '#01AC51' : 'var(--border)'"
+                     [style.box-shadow]="isTodaysBatch(batch) ? '0 0 0 1.5px #01AC5130' : '0 1px 3px rgba(0,0,0,0.04)'"
                      class="batch-card">
-                  <!-- Top row: badge + status -->
+                  <!-- Top row: batch code + today badge -->
                   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px;">
                     <span class="font-display" style="font-size:13px;font-weight:700;color:var(--foreground);background:var(--secondary);padding:3px 8px;border-radius:6px;font-family:monospace;letter-spacing:0.3px;">
                       {{ batch.batch_code }}
                     </span>
-                    <span [style.background]="col.color + '18'" [style.color]="col.color"
-                          style="font-size:10px;font-weight:600;padding:3px 8px;border-radius:6px;white-space:nowrap;text-transform:uppercase;letter-spacing:0.3px;">
-                      {{ col.label }}
-                    </span>
+                    @if (isTodaysBatch(batch)) {
+                      <span style="font-size:10px;font-weight:700;padding:3px 7px;border-radius:6px;white-space:nowrap;text-transform:uppercase;letter-spacing:0.3px;background:#dcfce7;color:#15803d;display:flex;align-items:center;gap:3px;">
+                        <span style="width:5px;height:5px;background:#15803d;border-radius:50%;display:inline-block;"></span>
+                        TODAY
+                      </span>
+                    } @else {
+                      <span [style.background]="col.color + '18'" [style.color]="col.color"
+                            style="font-size:10px;font-weight:600;padding:3px 8px;border-radius:6px;white-space:nowrap;text-transform:uppercase;letter-spacing:0.3px;">
+                        {{ col.label }}
+                      </span>
+                    }
                   </div>
 
                   <!-- Flavor name -->
@@ -142,9 +200,12 @@ interface KanbanColumn {
 })
 export class KanbanComponent implements OnInit, OnDestroy {
   private readonly supabase = inject(SupabaseService);
+  readonly batchCodeSvc = inject(BatchCodeService);
 
   loading = signal(false);
   batches = signal<Batch[]>([]);
+  filterByToday = false;
+  batchCodeFilter = '';
 
   columns: KanbanColumn[] = [
     { status: 'production', label: 'Production', color: '#2563eb', bgColor: '#eff6ff',  icon: 'precision_manufacturing' },
@@ -155,9 +216,12 @@ export class KanbanComponent implements OnInit, OnDestroy {
 
   private refreshInterval: ReturnType<typeof setInterval> | null = null;
 
+  readonly totalVisible = computed(() => {
+    return this.columns.reduce((sum, col) => sum + this.getFilteredBatches(col.status).length, 0);
+  });
+
   async ngOnInit(): Promise<void> {
     await this.loadBatches();
-    // Auto-refresh every 30 seconds
     this.refreshInterval = setInterval(() => {
       void this.loadBatches();
     }, 30000);
@@ -170,8 +234,29 @@ export class KanbanComponent implements OnInit, OnDestroy {
     }
   }
 
-  getBatches(status: string): Batch[] {
-    return this.batches().filter(b => b.status === status);
+  isTodaysBatch(batch: Batch): boolean {
+    const todayCode = this.batchCodeSvc.batchCode();
+    return !!todayCode && batch.batch_code === todayCode;
+  }
+
+  getFilteredBatches(status: string): Batch[] {
+    let list = this.batches().filter(b => b.status === status);
+    if (this.batchCodeFilter) {
+      const q = this.batchCodeFilter.toLowerCase();
+      list = list.filter(b => b.batch_code.toLowerCase().includes(q));
+    } else if (this.filterByToday && this.batchCodeSvc.batchCode()) {
+      list = list.filter(b => b.batch_code === this.batchCodeSvc.batchCode());
+    }
+    return list;
+  }
+
+  onFilterChange(): void {
+    // Trigger change detection — signals handle the rest
+  }
+
+  clearFilter(): void {
+    this.batchCodeFilter = '';
+    this.filterByToday = false;
   }
 
   async refreshBoard(): Promise<void> {

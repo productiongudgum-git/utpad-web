@@ -2,6 +2,7 @@ import { Component, computed, inject } from '@angular/core';
 import { CommonModule, DecimalPipe, TitleCasePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { OperationsLiveService } from '../../../core/services/operations-live.service';
+import { BatchCodeService } from '../../../core/services/batch-code.service';
 
 @Component({
   selector: 'app-command-center',
@@ -18,9 +19,30 @@ import { OperationsLiveService } from '../../../core/services/operations-live.se
               Live visibility into production-in-hand, wastage, reorder risk, credentials, and access control.
             </p>
           </div>
-          <div class="text-sm text-text-sub-light dark:text-text-sub-dark">
-            Last event:
-            <span class="font-semibold text-text-main-light dark:text-text-main-dark">{{ lastEventTimestamp() }}</span>
+          <div class="flex flex-col items-end gap-2">
+            <!-- Today's Batch Code -->
+            <div class="flex items-center gap-3 bg-primary/8 border border-primary/20 rounded-xl px-4 py-3">
+              <div class="flex flex-col items-center leading-none">
+                <span class="text-xs uppercase tracking-widest text-text-sub-light dark:text-text-sub-dark font-semibold mb-1">Today's Batch Code</span>
+                @if (batchCodeSvc.loading()) {
+                  <span class="text-lg font-mono font-bold text-text-sub-light animate-pulse">Loading…</span>
+                } @else if (batchCodeSvc.error()) {
+                  <span class="text-sm font-medium text-red-500">Unavailable</span>
+                } @else {
+                  <span class="text-2xl font-mono font-bold text-primary tracking-widest">{{ batchCodeSvc.batchCode() }}</span>
+                  @if (batchCodeSvc.batchDate()) {
+                    <span class="text-xs text-text-sub-light dark:text-text-sub-dark mt-0.5">{{ batchCodeSvc.batchDate() }}</span>
+                  }
+                }
+              </div>
+              <button (click)="batchCodeSvc.fetchTodaysBatchCode()" class="text-text-sub-light hover:text-primary transition-colors" title="Refresh batch code">
+                <span class="material-icons-round" style="font-size:16px;">refresh</span>
+              </button>
+            </div>
+            <div class="text-sm text-text-sub-light dark:text-text-sub-dark">
+              Last event:
+              <span class="font-semibold text-text-main-light dark:text-text-main-dark">{{ lastEventTimestamp() }}</span>
+            </div>
           </div>
         </div>
       </header>
@@ -151,6 +173,7 @@ import { OperationsLiveService } from '../../../core/services/operations-live.se
 })
 export class CommandCenterComponent {
   private readonly operations = inject(OperationsLiveService);
+  readonly batchCodeSvc = inject(BatchCodeService);
 
   readonly analytics = this.operations.analytics;
   readonly lowStock = this.operations.lowStockSkus;
