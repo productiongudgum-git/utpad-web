@@ -1,146 +1,348 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import { CommonModule, DecimalPipe } from '@angular/common';
 import { FormBuilder, ReactiveFormsModule, Validators, FormsModule } from '@angular/forms';
 import { SupabaseService } from '../../../core/supabase.service';
 
-interface Flavor { id: string; name: string; code: string; }
+const UNITS = ['kg', 'g', 'L', 'ml', 'pcs'] as const;
+type Unit = typeof UNITS[number];
+
+interface Flavor     { id: string; name: string; code: string; }
 interface Ingredient { id: string; name: string; default_unit: string; }
+
+interface RecipeIngredient {
+  ingredient_id: string;
+  name: string;
+  quantity: number;
+  unit: string;
+}
+
 interface RecipeRow {
-  id: string; name: string; flavor_id: string; flavor_name: string;
-  version: number; batch_size_kg: number; is_active: boolean;
-  ingredients: Array<{ ingredient_id: string; name: string; quantity: number; unit: string; }>;
+  id: string;
+  name: string;
+  flavor_id: string;
+  flavor_name: string;
+  version: number;
+  batch_size_kg: number;
+  is_active: boolean;
+  ingredients: RecipeIngredient[];
+}
+
+interface IngLine {
+  ingredientName: string;
+  quantity: number;
+  unit: string;
 }
 
 @Component({
   selector: 'app-recipes-admin',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, FormsModule],
+  imports: [CommonModule, DecimalPipe, ReactiveFormsModule, FormsModule],
   template: `
-    <div style="padding:24px;max-width:1100px;">
-      <div style="margin-bottom:24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+    <!-- ── datalists for comboboxes ─────────────────────────────────────── -->
+    <datalist id="fl-list">
+      @for (f of flavors(); track f.id) { <option [value]="f.name"> }
+    </datalist>
+    <datalist id="ing-list">
+      @for (i of ingredients(); track i.id) { <option [value]="i.name"> }
+    </datalist>
+
+    <!-- ── toast ──────────────────────────────────────────────────────────── -->
+    @if (toast()) {
+      <div class="rcp-toast" [class.rcp-toast-err]="toastKind() === 'error'">
+        <span class="material-icons-round" style="font-size:16px;">{{ toastKind() === 'error' ? 'error_outline' : 'check_circle' }}</span>
+        {{ toast() }}
+      </div>
+    }
+
+    <div style="padding:24px;max-width:1140px;">
+
+      <!-- ── Page header ─────────────────────────────────────────────────── -->
+      <div style="margin-bottom:24px;display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;">
         <div>
-          <h1 style="font-family:'Cabin',sans-serif;font-size:22px;font-weight:700;color:#121212;margin:0 0 4px;">Recipes</h1>
-          <p style="color:#6B7280;font-size:14px;margin:0;">Manage production recipes and ingredient bills of materials.</p>
+          <h1 style="font-size:22px;font-weight:700;color:var(--foreground);margin:0 0 4px;font-family:'Cabin',sans-serif;">Recipes</h1>
+          <p style="color:#6B7280;font-size:14px;margin:0;">Build bills of materials for each flavor variant.</p>
         </div>
-        <button (click)="showForm.set(!showForm())" style="padding:9px 18px;background:#01AC51;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;">
-          <span class="material-icons-round" style="font-size:18px;">{{ showForm() ? 'close' : 'add' }}</span>
-          {{ showForm() ? 'Cancel' : 'New Recipe' }}
+        <button (click)="openNewForm()" [disabled]="showForm() && !editId()"
+                style="padding:9px 18px;background:#01AC51;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;opacity:1;"
+                [style.opacity]="showForm() && !editId() ? '0.6' : '1'">
+          <span class="material-icons-round" style="font-size:18px;">add</span>
+          New Recipe
         </button>
       </div>
 
-      <!-- Create form -->
+      <!-- ── Recipe form ─────────────────────────────────────────────────── -->
       @if (showForm()) {
-        <div style="background:#fff;border-radius:12px;border:1px solid #E5E7EB;padding:24px;margin-bottom:24px;">
-          <h2 style="font-family:'Cabin',sans-serif;font-size:16px;font-weight:600;color:#121212;margin:0 0 20px;">{{ editId() ? 'Edit Recipe' : 'New Recipe' }}</h2>
+        <div class="recipe-form-card" style="background:var(--card);border-radius:14px;border:1px solid var(--border);padding:24px;margin-bottom:24px;animation:slideDown 0.15s ease;">
+
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+            <h2 style="font-size:16px;font-weight:700;color:var(--foreground);margin:0;">
+              {{ editId() ? 'Edit Recipe' : 'New Recipe' }}
+            </h2>
+            <button (click)="closeForm()" style="border:none;background:none;cursor:pointer;color:#9CA3AF;display:flex;align-items:center;">
+              <span class="material-icons-round" style="font-size:20px;">close</span>
+            </button>
+          </div>
+
           <form [formGroup]="form" (ngSubmit)="save()">
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px;" class="recipe-grid">
+
+            <!-- Meta fields -->
+            <div class="rcp-meta-grid" style="display:grid;grid-template-columns:2fr 2fr 1fr 1.2fr;gap:14px;margin-bottom:20px;">
               <div>
-                <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Recipe Name *</label>
-                <input formControlName="name" class="gg-input" placeholder="e.g. Spearmint Base v2">
+                <label class="rcp-label">Recipe Name *</label>
+                <input formControlName="name" class="gg-input" placeholder="e.g. Spearmint Base v2"
+                       [style.border-color]="form.get('name')!.invalid && form.get('name')!.touched ? '#dc2626' : ''">
+                @if (form.get('name')!.invalid && form.get('name')!.touched) {
+                  <p style="color:#dc2626;font-size:11px;margin:3px 0 0;">Required</p>
+                }
               </div>
+
               <div>
-                <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Flavor *</label>
-                <select formControlName="flavor_id" class="gg-input dropdown-with-arrow">
-                  <option value="">Select flavor...</option>
-                  @for (f of flavors(); track f.id) {
-                    <option [value]="f.id">{{ f.name }}</option>
-                  }
-                </select>
+                <label class="rcp-label">Flavor *
+                  <span style="font-weight:400;color:#9CA3AF;">(type or pick from list)</span>
+                </label>
+                <input [(ngModel)]="flavorNameInput" [ngModelOptions]="{standalone:true}"
+                       list="fl-list" class="gg-input"
+                       placeholder="e.g. Strawberry, Charcoal Spearmint"
+                       (input)="onFlavorInput()">
+                @if (flavorHint()) {
+                  <p style="font-size:11px;margin:3px 0 0;"
+                     [style.color]="flavorIsNew() ? '#d97706' : '#16a34a'">
+                    {{ flavorHint() }}
+                  </p>
+                }
               </div>
+
               <div>
-                <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Version</label>
+                <label class="rcp-label">Version</label>
                 <input formControlName="version" type="number" min="1" class="gg-input" placeholder="1">
               </div>
+
               <div>
-                <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Batch Size (kg) *</label>
-                <input formControlName="batch_size_kg" type="number" min="0.1" step="0.1" class="gg-input" placeholder="100">
+                <label class="rcp-label">Batch Size (kg) *</label>
+                <input formControlName="batch_size_kg" type="number" min="0.1" step="0.1" class="gg-input" placeholder="100"
+                       [style.border-color]="form.get('batch_size_kg')!.invalid && form.get('batch_size_kg')!.touched ? '#dc2626' : ''">
               </div>
             </div>
 
-            <!-- Ingredients -->
-            <div style="margin-bottom:16px;">
+            <!-- Ingredients table -->
+            <div style="margin-bottom:20px;">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-                <label style="font-size:12px;font-weight:600;color:#374151;">Ingredients</label>
-                <button type="button" (click)="addIngLine()" style="padding:4px 10px;background:#f0fdf4;border:1px solid #01AC51;color:#01AC51;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">+ Add</button>
+                <label class="rcp-label" style="margin:0;">Ingredients
+                  <span style="font-weight:400;color:#9CA3AF;font-size:11px;"> — type to search existing ingredients</span>
+                </label>
+                <button type="button" (click)="addIngLine()"
+                        style="padding:5px 12px;background:#f0fdf4;border:1px solid #01AC51;color:#01AC51;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;">
+                  <span class="material-icons-round" style="font-size:14px;">add</span> Add ingredient
+                </button>
               </div>
-              @for (line of ingLines(); track $index) {
-                <div style="display:grid;grid-template-columns:1fr 120px 100px 36px;gap:8px;margin-bottom:8px;align-items:center;">
-                  <select [(ngModel)]="line.ingredient_id" [ngModelOptions]="{standalone:true}" class="gg-input dropdown-with-arrow" style="font-size:13px;">
-                    <option value="">Select ingredient...</option>
-                    @for (i of ingredients(); track i.id) {
-                      <option [value]="i.id">{{ i.name }}</option>
-                    }
-                  </select>
-                  <input [(ngModel)]="line.quantity" [ngModelOptions]="{standalone:true}" type="number" min="0" step="0.01" class="gg-input" placeholder="Qty" style="font-size:13px;">
-                  <input [(ngModel)]="line.unit" [ngModelOptions]="{standalone:true}" class="gg-input" placeholder="kg/L/g" style="font-size:13px;">
-                  <button type="button" (click)="removeIngLine($index)" style="width:32px;height:32px;background:#fee2e2;border:none;border-radius:6px;color:#dc2626;cursor:pointer;display:flex;align-items:center;justify-content:center;">
-                    <span class="material-icons-round" style="font-size:16px;">close</span>
-                  </button>
+
+              @if (ingLines().length === 0) {
+                <div style="padding:20px;border:2px dashed #E5E7EB;border-radius:10px;text-align:center;color:#9CA3AF;font-size:13px;">
+                  No ingredients yet — click "Add ingredient" to start building the bill of materials.
+                </div>
+              }
+
+              @if (ingLines().length > 0) {
+                <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;">
+                  <!-- Header -->
+                  <div style="display:grid;grid-template-columns:1fr 110px 100px 36px;gap:8px;padding:8px 12px;background:#f8f9fa;border-bottom:1px solid var(--border);">
+                    <span style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Ingredient</span>
+                    <span style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Quantity</span>
+                    <span style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Unit</span>
+                    <span></span>
+                  </div>
+                  <!-- Rows -->
+                  @for (line of ingLines(); track $index) {
+                    <div style="display:grid;grid-template-columns:1fr 110px 100px 36px;gap:8px;padding:8px 12px;border-bottom:1px solid #f3f4f6;align-items:center;">
+                      <input [(ngModel)]="line.ingredientName" [ngModelOptions]="{standalone:true}"
+                             list="ing-list" class="gg-input" placeholder="Ingredient name…"
+                             style="font-size:13px;"
+                             (change)="onIngNameChange(line)">
+                      <input [(ngModel)]="line.quantity" [ngModelOptions]="{standalone:true}"
+                             type="number" min="0" step="0.001" class="gg-input"
+                             placeholder="0" style="font-size:13px;">
+                      <select [(ngModel)]="line.unit" [ngModelOptions]="{standalone:true}"
+                              class="gg-input dropdown-with-arrow" style="font-size:13px;">
+                        @for (u of UNITS; track u) { <option [value]="u">{{ u }}</option> }
+                      </select>
+                      <button type="button" (click)="removeIngLine($index)"
+                              style="width:32px;height:32px;background:#fff5f5;border:1px solid #fca5a5;border-radius:6px;color:#dc2626;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                        <span class="material-icons-round" style="font-size:15px;">delete_outline</span>
+                      </button>
+                    </div>
+                  }
+                  <!-- Totals row -->
+                  @if (ingLines().length > 0) {
+                    <div style="display:grid;grid-template-columns:1fr 110px 100px 36px;gap:8px;padding:8px 12px;background:#f8f9fa;align-items:center;">
+                      <span style="font-size:12px;font-weight:600;color:#374151;">Total (kg-equivalent)</span>
+                      <span style="font-size:13px;font-weight:700;color:#01AC51;">{{ kgTotal() | number:'1.0-2' }}</span>
+                      <span style="font-size:12px;color:#9CA3AF;">kg</span>
+                      <span></span>
+                    </div>
+                  }
                 </div>
               }
             </div>
 
             @if (formError()) {
-              <p style="color:#FF2828;font-size:13px;margin-bottom:12px;">{{ formError() }}</p>
+              <div style="display:flex;align-items:center;gap:6px;color:#dc2626;font-size:13px;margin-bottom:14px;padding:10px 14px;background:#fff5f5;border:1px solid #fca5a5;border-radius:8px;">
+                <span class="material-icons-round" style="font-size:16px;">error_outline</span>
+                {{ formError() }}
+              </div>
             }
 
-            <div style="display:flex;gap:10px;">
-              <button type="submit" [disabled]="saving()" class="gg-btn-primary">
-                {{ saving() ? 'Saving...' : (editId() ? 'Update Recipe' : 'Create Recipe') }}
+            <div style="display:flex;gap:10px;align-items:center;">
+              <button type="submit" [disabled]="saving()"
+                      style="padding:9px 20px;background:#01AC51;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;"
+                      [style.opacity]="saving() ? '0.7' : '1'">
+                @if (saving()) {
+                  <span class="material-icons-round rcp-spin" style="font-size:16px;">autorenew</span>
+                } @else {
+                  <span class="material-icons-round" style="font-size:16px;">save</span>
+                }
+                {{ saving() ? 'Saving…' : (editId() ? 'Update Recipe' : 'Create Recipe') }}
               </button>
-              @if (editId()) {
-                <button type="button" (click)="cancelEdit()" style="padding:8px 16px;background:#f3f4f6;border:1px solid #E5E7EB;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;color:#374151;">Cancel</button>
-              }
+              <button type="button" (click)="closeForm()"
+                      style="padding:9px 16px;background:var(--secondary);border:1px solid var(--border);border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;color:var(--foreground);">
+                Cancel
+              </button>
             </div>
           </form>
         </div>
       }
 
-      @if (toast()) {
-        <div class="toast" [class.toast-success]="toastKind()==='success'" [class.toast-error]="toastKind()==='error'">{{ toast() }}</div>
-      }
+      <!-- ── Search & stats bar ──────────────────────────────────────────── -->
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:200px;position:relative;">
+          <span class="material-icons-round" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:17px;color:#9CA3AF;pointer-events:none;">search</span>
+          <input [(ngModel)]="rawSearch" (ngModelChange)="searchSig.set($event)"
+                 placeholder="Search recipes or flavors…"
+                 style="width:100%;padding:9px 12px 9px 34px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--card);color:var(--foreground);outline:none;box-sizing:border-box;">
+        </div>
+        <span style="font-size:13px;color:#6B7280;white-space:nowrap;">
+          {{ filtered().length }} recipe{{ filtered().length === 1 ? '' : 's' }}
+        </span>
+      </div>
 
-      <!-- Recipe List -->
+      <!-- ── Recipe list ─────────────────────────────────────────────────── -->
       @if (loading()) {
         <div style="display:flex;flex-direction:column;gap:12px;">
           @for (i of [1,2,3]; track i) {
-            <div class="gg-skeleton" style="height:80px;border-radius:12px;"></div>
+            <div class="gg-skeleton" style="height:88px;border-radius:12px;"></div>
           }
         </div>
-      } @else if (recipes().length === 0) {
-        <div style="text-align:center;padding:60px 0;color:#9CA3AF;">
-          <span class="material-icons-round" style="font-size:48px;display:block;margin-bottom:12px;">science</span>
-          <p style="font-size:15px;margin:0;">No recipes yet. Create your first one!</p>
+      } @else if (filtered().length === 0) {
+        <div style="text-align:center;padding:72px 0;color:#9CA3AF;">
+          <span class="material-icons-round" style="font-size:52px;display:block;margin-bottom:14px;">science</span>
+          <p style="font-size:15px;font-weight:600;margin:0 0 6px;color:#374151;">
+            {{ recipes().length === 0 ? 'No recipes yet' : 'No recipes match your search' }}
+          </p>
+          <p style="font-size:13px;margin:0;">
+            {{ recipes().length === 0 ? 'Create your first recipe using the button above.' : 'Try a different search term.' }}
+          </p>
         </div>
       } @else {
-        <div style="display:flex;flex-direction:column;gap:12px;">
-          @for (r of recipes(); track r.id) {
-            <div style="background:#fff;border-radius:12px;border:1px solid #E5E7EB;padding:16px 20px;">
-              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-                <div>
-                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-                    <span style="font-size:15px;font-weight:700;color:#121212;font-family:'Cabin',sans-serif;">{{ r.name }}</span>
-                    <span style="background:#dcfce7;color:#15803d;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;">v{{ r.version }}</span>
-                    @if (!r.is_active) {
-                      <span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;">Inactive</span>
-                    }
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          @for (r of filtered(); track r.id) {
+            <div style="background:var(--card);border-radius:12px;border:1px solid var(--border);overflow:hidden;transition:box-shadow 0.15s;"
+                 class="rcp-card">
+
+              <!-- Card top row -->
+              <div style="padding:16px 20px;cursor:pointer;" (click)="toggleExpand(r.id)">
+                <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+
+                  <!-- Left: recipe info -->
+                  <div style="min-width:0;flex:1;">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap;">
+                      <span style="font-size:15px;font-weight:700;color:var(--foreground);font-family:'Cabin',sans-serif;">{{ r.name }}</span>
+                      <span style="background:#dbeafe;color:#1d4ed8;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;font-family:monospace;">v{{ r.version }}</span>
+                      @if (!r.is_active) {
+                        <span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;">Inactive</span>
+                      }
+                    </div>
+                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                      <span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#374151;background:#f0fdf4;border:1px solid #bbf7d0;padding:2px 8px;border-radius:6px;font-weight:500;">
+                        <span class="material-icons-round" style="font-size:13px;color:#16a34a;">local_dining</span>
+                        {{ r.flavor_name }}
+                      </span>
+                      <span style="font-size:12px;color:#6B7280;">·</span>
+                      <span style="font-size:12px;color:#6B7280;">
+                        <strong style="color:#374151;">{{ r.batch_size_kg }} kg</strong> batch
+                      </span>
+                      <span style="font-size:12px;color:#6B7280;">·</span>
+                      <span style="font-size:12px;color:#6B7280;">{{ r.ingredients.length }} ingredient{{ r.ingredients.length === 1 ? '' : 's' }}</span>
+                    </div>
                   </div>
-                  <p style="font-size:13px;color:#6B7280;margin:0;">
-                    Flavor: <strong style="color:#121212;">{{ r.flavor_name }}</strong> ·
-                    Batch: <strong style="color:#121212;">{{ r.batch_size_kg }} kg</strong> ·
-                    {{ r.ingredients.length }} ingredient(s)
-                  </p>
-                  @if (r.ingredients.length > 0) {
-                    <p style="font-size:12px;color:#9CA3AF;margin:4px 0 0;">
-                      {{ formatIngredients(r.ingredients) }}
-                    </p>
-                  }
-                </div>
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <button (click)="startEdit(r)" style="padding:6px 12px;background:#f0fdf4;border:1px solid #01AC51;color:#01AC51;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">Edit</button>
-                  <button (click)="deleteRecipe(r.id)" style="padding:6px 12px;background:#fff5f5;border:1px solid #fca5a5;color:#dc2626;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">Delete</button>
+
+                  <!-- Right: actions + chevron -->
+                  <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;" (click)="$event.stopPropagation()">
+                    <button (click)="startEdit(r)"
+                            style="padding:6px 12px;background:#f0fdf4;border:1px solid #01AC51;color:#01AC51;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;">
+                      <span class="material-icons-round" style="font-size:14px;">edit</span> Edit
+                    </button>
+                    <button (click)="cloneRecipe(r)" title="Duplicate as next version"
+                            style="padding:6px 12px;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;">
+                      <span class="material-icons-round" style="font-size:14px;">content_copy</span> Clone
+                    </button>
+                    <button (click)="toggleActive(r)"
+                            [style.background]="r.is_active ? '#fffbeb' : '#f0fdf4'"
+                            [style.border-color]="r.is_active ? '#fde68a' : '#bbf7d0'"
+                            [style.color]="r.is_active ? '#b45309' : '#15803d'"
+                            style="padding:6px 12px;border-style:solid;border-width:1px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;">
+                      <span class="material-icons-round" style="font-size:14px;">{{ r.is_active ? 'pause_circle' : 'play_circle' }}</span>
+                      {{ r.is_active ? 'Deactivate' : 'Activate' }}
+                    </button>
+                    <button (click)="deleteRecipe(r.id)"
+                            style="padding:6px 10px;background:#fff5f5;border:1px solid #fca5a5;color:#dc2626;border-radius:6px;font-size:12px;cursor:pointer;display:flex;align-items:center;">
+                      <span class="material-icons-round" style="font-size:16px;">delete_outline</span>
+                    </button>
+                    <span class="material-icons-round" style="font-size:20px;color:#9CA3AF;transition:transform 0.2s;"
+                          [style.transform]="expanded().has(r.id) ? 'rotate(180deg)' : 'none'">expand_more</span>
+                  </div>
                 </div>
               </div>
+
+              <!-- Expanded ingredient table -->
+              @if (expanded().has(r.id)) {
+                <div style="border-top:1px solid var(--border);background:#fafafa;">
+                  @if (r.ingredients.length === 0) {
+                    <div style="padding:20px 24px;color:#9CA3AF;font-size:13px;text-align:center;">No ingredients added to this recipe.</div>
+                  } @else {
+                    <table style="width:100%;border-collapse:collapse;">
+                      <thead>
+                        <tr style="background:#f3f4f6;">
+                          <th style="text-align:left;padding:8px 20px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">#</th>
+                          <th style="text-align:left;padding:8px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Ingredient</th>
+                          <th style="text-align:right;padding:8px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Quantity</th>
+                          <th style="text-align:left;padding:8px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Unit</th>
+                          <th style="text-align:right;padding:8px 20px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">% of batch</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (ing of r.ingredients; track ing.ingredient_id; let idx = $index) {
+                          <tr style="border-top:1px solid #f0f0f0;">
+                            <td style="padding:9px 20px;font-size:12px;color:#9CA3AF;">{{ idx + 1 }}</td>
+                            <td style="padding:9px 12px;font-size:13px;font-weight:600;color:var(--foreground);">{{ ing.name }}</td>
+                            <td style="padding:9px 12px;font-size:13px;font-weight:700;color:#374151;text-align:right;">{{ ing.quantity | number:'1.0-3' }}</td>
+                            <td style="padding:9px 12px;">
+                              <span style="font-size:11px;font-weight:600;background:#f3f4f6;padding:2px 7px;border-radius:4px;color:#374151;">{{ ing.unit }}</span>
+                            </td>
+                            <td style="padding:9px 20px;text-align:right;">
+                              @if (ing.unit === 'kg' && r.batch_size_kg > 0) {
+                                <span style="font-size:12px;color:#6B7280;">
+                                  {{ (ing.quantity / r.batch_size_kg * 100) | number:'1.0-1' }}%
+                                </span>
+                              } @else {
+                                <span style="font-size:12px;color:#d1d5db;">—</span>
+                              }
+                            </td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  }
+                </div>
+              }
             </div>
           }
         </div>
@@ -148,8 +350,24 @@ interface RecipeRow {
     </div>
 
     <style>
-      @media (max-width:700px) { .recipe-grid { grid-template-columns: 1fr 1fr !important; } }
-      @media (max-width:480px) { .recipe-grid { grid-template-columns: 1fr !important; } }
+      .rcp-label { display:block; font-size:12px; font-weight:600; color:#374151; margin-bottom:6px; }
+      .rcp-card:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.07); }
+      .rcp-toast {
+        position:fixed; bottom:24px; right:24px; z-index:9999;
+        padding:12px 18px; border-radius:10px;
+        background:#1a1a1a; color:#fff;
+        font-size:14px; font-weight:500;
+        display:flex; align-items:center; gap:8px;
+        box-shadow:0 4px 20px rgba(0,0,0,0.25);
+        animation:slideUp 0.2s ease;
+      }
+      .rcp-toast-err { background:#dc2626; }
+      @keyframes slideUp { from { transform:translateY(16px); opacity:0; } to { transform:translateY(0); opacity:1; } }
+      @keyframes slideDown { from { transform:translateY(-8px); opacity:0; } to { transform:translateY(0); opacity:1; } }
+      @keyframes spin { to { transform:rotate(360deg); } }
+      .rcp-spin { animation: spin 0.8s linear infinite; }
+      @media (max-width:760px) { .rcp-meta-grid { grid-template-columns: 1fr 1fr !important; } }
+      @media (max-width:480px) { .rcp-meta-grid { grid-template-columns: 1fr !important; } }
     </style>
   `,
 })
@@ -157,98 +375,265 @@ export class RecipesAdminComponent implements OnInit {
   private readonly supabase = inject(SupabaseService);
   private readonly fb = inject(FormBuilder);
 
-  loading = signal(true);
-  saving = signal(false);
-  showForm = signal(false);
-  editId = signal<string | null>(null);
-  recipes = signal<RecipeRow[]>([]);
-  flavors = signal<Flavor[]>([]);
+  readonly UNITS = UNITS;
+
+  loading    = signal(true);
+  saving     = signal(false);
+  showForm   = signal(false);
+  editId     = signal<string | null>(null);
+  recipes    = signal<RecipeRow[]>([]);
+  flavors    = signal<Flavor[]>([]);
   ingredients = signal<Ingredient[]>([]);
-  ingLines = signal<Array<{ingredient_id:string;quantity:number;unit:string}>>([]);
-  formError = signal('');
-  toast = signal('');
-  toastKind = signal<'success'|'error'>('success');
+  ingLines   = signal<IngLine[]>([]);
+  expanded   = signal<Set<string>>(new Set());
+  formError  = signal('');
+  toast      = signal('');
+  toastKind  = signal<'success' | 'error'>('success');
+
+  // Flavor combobox
+  flavorNameInput = '';
+  flavorHint = signal('');
+  flavorIsNew = signal(false);
+
+  // Search
+  rawSearch = '';
+  searchSig = signal('');
+
+  readonly filtered = computed(() => {
+    const q = this.searchSig().toLowerCase().trim();
+    if (!q) return this.recipes();
+    return this.recipes().filter(r =>
+      r.name.toLowerCase().includes(q) || r.flavor_name.toLowerCase().includes(q)
+    );
+  });
+
+  readonly kgTotal = computed(() =>
+    this.ingLines()
+      .filter(l => l.unit === 'kg')
+      .reduce((s, l) => s + (Number(l.quantity) || 0), 0)
+  );
 
   form = this.fb.nonNullable.group({
-    name: ['', Validators.required],
-    flavor_id: ['', Validators.required],
-    version: [1, [Validators.required, Validators.min(1)]],
+    name:          ['', Validators.required],
+    version:       [1, [Validators.required, Validators.min(1)]],
     batch_size_kg: [100, [Validators.required, Validators.min(0.1)]],
   });
 
   async ngOnInit(): Promise<void> {
-    await Promise.all([this.loadRecipes(), this.loadFlavors(), this.loadIngredients()]);
+    await Promise.all([this.loadIngredients(), this.loadFlavors()]);
+    await this.loadRecipes();
   }
 
+  // ── Ingredient lines ──────────────────────────────────────────────────
+
   addIngLine(): void {
-    this.ingLines.update(l => [...l, { ingredient_id: '', quantity: 0, unit: 'kg' }]);
+    this.ingLines.update(l => [...l, { ingredientName: '', quantity: 0, unit: 'kg' }]);
   }
 
   removeIngLine(i: number): void {
     this.ingLines.update(l => l.filter((_, idx) => idx !== i));
   }
 
-  formatIngredients(ingredients: { name: string; quantity: number; unit: string }[]): string {
-    return ingredients.map(i => i.name + ' ' + i.quantity + ' ' + i.unit).join(' · ');
+  onIngNameChange(line: IngLine): void {
+    const match = this.ingredients().find(
+      i => i.name.toLowerCase() === line.ingredientName.toLowerCase()
+    );
+    if (match && line.unit === 'kg' && match.default_unit) {
+      line.unit = match.default_unit as Unit;
+    }
+  }
+
+  // ── Flavor combobox ───────────────────────────────────────────────────
+
+  onFlavorInput(): void {
+    const name = this.flavorNameInput.trim();
+    if (!name) { this.flavorHint.set(''); return; }
+    const existing = this.flavors().find(f => f.name.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      this.flavorIsNew.set(false);
+      this.flavorHint.set('✓ Existing flavor');
+    } else {
+      this.flavorIsNew.set(true);
+      this.flavorHint.set('New flavor — will be created on save');
+    }
+  }
+
+  // ── Form open/close ───────────────────────────────────────────────────
+
+  openNewForm(): void {
+    this.editId.set(null);
+    this.form.reset({ name: '', version: this.nextDefaultVersion(), batch_size_kg: 100 });
+    this.flavorNameInput = '';
+    this.flavorHint.set('');
+    this.ingLines.set([{ ingredientName: '', quantity: 0, unit: 'kg' }]);
+    this.formError.set('');
+    this.showForm.set(true);
+    setTimeout(() => document.querySelector('.recipe-form-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
   }
 
   startEdit(r: RecipeRow): void {
     this.editId.set(r.id);
-    this.form.setValue({ name: r.name, flavor_id: r.flavor_id, version: r.version, batch_size_kg: r.batch_size_kg });
-    this.ingLines.set(r.ingredients.map(i => ({ ingredient_id: i.ingredient_id, quantity: i.quantity, unit: i.unit })));
-    this.showForm.set(true);
+    this.form.setValue({ name: r.name, version: r.version, batch_size_kg: r.batch_size_kg });
+    this.flavorNameInput = r.flavor_name;
+    this.flavorHint.set('✓ Existing flavor');
+    this.flavorIsNew.set(false);
+    this.ingLines.set(
+      r.ingredients.length > 0
+        ? r.ingredients.map(i => ({ ingredientName: i.name, quantity: i.quantity, unit: i.unit }))
+        : [{ ingredientName: '', quantity: 0, unit: 'kg' }]
+    );
     this.formError.set('');
+    this.showForm.set(true);
+    setTimeout(() => document.querySelector('.recipe-form-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
   }
 
-  cancelEdit(): void {
-    this.editId.set(null);
-    this.form.reset({ name: '', flavor_id: '', version: 1, batch_size_kg: 100 });
-    this.ingLines.set([]);
+  closeForm(): void {
     this.showForm.set(false);
+    this.editId.set(null);
+    this.formError.set('');
+    this.form.reset();
+    this.flavorNameInput = '';
+    this.flavorHint.set('');
+    this.ingLines.set([]);
   }
+
+  cloneRecipe(r: RecipeRow): void {
+    const nextVersion = Math.max(
+      ...this.recipes()
+        .filter(x => x.flavor_id === r.flavor_id)
+        .map(x => x.version),
+      r.version
+    ) + 1;
+    const baseName = r.name.replace(/ v\d+$/, '').trim();
+    this.editId.set(null);
+    this.form.setValue({ name: `${baseName} v${nextVersion}`, version: nextVersion, batch_size_kg: r.batch_size_kg });
+    this.flavorNameInput = r.flavor_name;
+    this.flavorHint.set('✓ Existing flavor');
+    this.flavorIsNew.set(false);
+    this.ingLines.set(
+      r.ingredients.map(i => ({ ingredientName: i.name, quantity: i.quantity, unit: i.unit }))
+    );
+    this.formError.set('');
+    this.showForm.set(true);
+    setTimeout(() => document.querySelector('.recipe-form-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  }
+
+  // ── Save ──────────────────────────────────────────────────────────────
 
   async save(): Promise<void> {
-    if (this.form.invalid) { this.form.markAllAsTouched(); return; }
-    this.saving.set(true);
-    this.formError.set('');
-    const v = this.form.getRawValue();
-    const ings = this.ingLines().filter(l => l.ingredient_id);
-    const payload = { name: v.name, flavor_id: v.flavor_id, version: v.version, batch_size_kg: v.batch_size_kg, ingredients: ings, is_active: true };
+    this.form.markAllAsTouched();
+    if (this.form.invalid) return;
 
-    let recipeId = this.editId();
-    if (recipeId) {
-      const { error } = await this.supabase.client.from('gg_recipes').update(payload).eq('id', recipeId);
-      if (error) { this.formError.set(error.message); this.saving.set(false); return; }
-    } else {
-      const { data, error } = await this.supabase.client.from('gg_recipes').insert(payload).select('id').single();
-      if (error || !data) { this.formError.set(error?.message ?? 'Failed'); this.saving.set(false); return; }
-      recipeId = data.id;
+    const flavorName = this.flavorNameInput.trim();
+    if (!flavorName) {
+      this.formError.set('Please enter or select a flavor.');
+      return;
     }
 
-    this.showToast(this.editId() ? 'Recipe updated' : 'Recipe created', 'success');
-    this.cancelEdit();
-    await this.loadRecipes();
-    this.saving.set(false);
+    this.saving.set(true);
+    this.formError.set('');
+
+    try {
+      // 1. Resolve or create flavor
+      const flavorId = await this.resolveFlavorId(flavorName);
+      if (!flavorId) {
+        this.formError.set('Failed to create flavor. Please try again.');
+        return;
+      }
+
+      // 2. Resolve ingredient IDs
+      const validLines = this.ingLines().filter(l => l.ingredientName.trim() && l.quantity > 0);
+      const ingredients: Array<{ ingredient_id: string; quantity: number; unit: string }> = [];
+      for (const line of validLines) {
+        const ingId = await this.resolveIngredientId(line);
+        if (!ingId) {
+          this.formError.set(`Could not find or create ingredient "${line.ingredientName}". Please check the name.`);
+          return;
+        }
+        ingredients.push({ ingredient_id: ingId, quantity: line.quantity, unit: line.unit });
+      }
+
+      // 3. Upsert recipe
+      const v = this.form.getRawValue();
+      const payload = {
+        name: v.name,
+        flavor_id: flavorId,
+        version: v.version,
+        batch_size_kg: v.batch_size_kg,
+        ingredients,
+        is_active: true,
+      };
+
+      const isEdit = this.editId();
+      if (isEdit) {
+        const { error } = await this.supabase.client.from('gg_recipes').update(payload).eq('id', isEdit);
+        if (error) { this.formError.set(error.message); return; }
+        this.showToast('Recipe updated', 'success');
+      } else {
+        const { error } = await this.supabase.client.from('gg_recipes').insert(payload);
+        if (error) { this.formError.set(error.message); return; }
+        this.showToast('Recipe created', 'success');
+      }
+
+      this.closeForm();
+      await this.loadRecipes();
+    } finally {
+      this.saving.set(false);
+    }
   }
 
+  // ── Delete / toggle active ────────────────────────────────────────────
+
   async deleteRecipe(id: string): Promise<void> {
-    if (!confirm('Delete this recipe?')) return;
+    if (!confirm('Delete this recipe? This cannot be undone.')) return;
     const { error } = await this.supabase.client.from('gg_recipes').delete().eq('id', id);
-    if (!error) { this.showToast('Recipe deleted', 'success'); await this.loadRecipes(); }
-    else this.showToast(error.message, 'error');
+    if (error) { this.showToast(error.message, 'error'); return; }
+    this.showToast('Recipe deleted', 'success');
+    await this.loadRecipes();
   }
+
+  async toggleActive(r: RecipeRow): Promise<void> {
+    const { error } = await this.supabase.client
+      .from('gg_recipes')
+      .update({ is_active: !r.is_active })
+      .eq('id', r.id);
+    if (error) { this.showToast(error.message, 'error'); return; }
+    await this.loadRecipes();
+  }
+
+  // ── Expand/collapse ───────────────────────────────────────────────────
+
+  toggleExpand(id: string): void {
+    this.expanded.update(s => {
+      const next = new Set(s);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  // ── Data loading ──────────────────────────────────────────────────────
 
   private async loadRecipes(): Promise<void> {
     this.loading.set(true);
-    const { data } = await this.supabase.client.from('gg_recipes')
+    const { data } = await this.supabase.client
+      .from('gg_recipes')
       .select('id, name, flavor_id, version, batch_size_kg, is_active, ingredients, gg_flavors(name)')
       .order('created_at', { ascending: false });
-    const ingMap = new Map((this.ingredients()).map(i => [i.id, i]));
+
+    const ingMap = new Map(this.ingredients().map(i => [i.id, i]));
+
     this.recipes.set((data ?? []).map((r: any) => ({
-      id: r.id, name: r.name, flavor_id: r.flavor_id, flavor_name: r.gg_flavors?.name ?? 'Unknown',
-      version: r.version, batch_size_kg: r.batch_size_kg, is_active: r.is_active,
+      id: r.id,
+      name: r.name,
+      flavor_id: r.flavor_id,
+      flavor_name: r.gg_flavors?.name ?? 'Unknown',
+      version: r.version,
+      batch_size_kg: r.batch_size_kg,
+      is_active: r.is_active,
       ingredients: (r.ingredients ?? []).map((i: any) => ({
-        ingredient_id: i.ingredient_id, quantity: i.quantity, unit: i.unit,
+        ingredient_id: i.ingredient_id,
+        quantity: i.quantity,
+        unit: i.unit,
         name: ingMap.get(i.ingredient_id)?.name ?? i.ingredient_id,
       })),
     })));
@@ -256,17 +641,66 @@ export class RecipesAdminComponent implements OnInit {
   }
 
   private async loadFlavors(): Promise<void> {
-    const { data } = await this.supabase.client.from('gg_flavors').select('id, name, code').eq('active', true).order('name');
+    const { data } = await this.supabase.client
+      .from('gg_flavors')
+      .select('id, name, code')
+      .eq('active', true)
+      .order('name');
     this.flavors.set(data ?? []);
   }
 
   private async loadIngredients(): Promise<void> {
-    const { data } = await this.supabase.client.from('gg_ingredients').select('id, name, default_unit').order('name');
+    const { data } = await this.supabase.client
+      .from('gg_ingredients')
+      .select('id, name, default_unit')
+      .order('name');
     this.ingredients.set(data ?? []);
   }
 
-  private showToast(msg: string, kind: 'success'|'error'): void {
-    this.toast.set(msg); this.toastKind.set(kind);
-    setTimeout(() => this.toast.set(''), 3000);
+  // ── Helpers ───────────────────────────────────────────────────────────
+
+  private async resolveFlavorId(name: string): Promise<string | null> {
+    const existing = this.flavors().find(f => f.name.toLowerCase() === name.toLowerCase());
+    if (existing) return existing.id;
+
+    // Create new flavor
+    const code = name.replace(/\s+/g, '').toUpperCase().slice(0, 6);
+    const { data, error } = await this.supabase.client
+      .from('gg_flavors')
+      .insert({ name, code, active: true })
+      .select('id, name, code')
+      .single();
+    if (error || !data) return null;
+
+    this.flavors.update(list => [...list, data].sort((a, b) => a.name.localeCompare(b.name)));
+    return data.id;
+  }
+
+  private async resolveIngredientId(line: IngLine): Promise<string | null> {
+    const name = line.ingredientName.trim();
+    const existing = this.ingredients().find(i => i.name.toLowerCase() === name.toLowerCase());
+    if (existing) return existing.id;
+
+    // Auto-create ingredient with selected unit as default
+    const { data, error } = await this.supabase.client
+      .from('gg_ingredients')
+      .insert({ name, default_unit: line.unit, active: true })
+      .select('id, name, default_unit')
+      .single();
+    if (error || !data) return null;
+
+    this.ingredients.update(list => [...list, data].sort((a, b) => a.name.localeCompare(b.name)));
+    return data.id;
+  }
+
+  private nextDefaultVersion(): number {
+    if (this.recipes().length === 0) return 1;
+    return Math.max(...this.recipes().map(r => r.version)) + 1;
+  }
+
+  private showToast(msg: string, kind: 'success' | 'error'): void {
+    this.toast.set(msg);
+    this.toastKind.set(kind);
+    setTimeout(() => this.toast.set(''), 3500);
   }
 }
