@@ -9,7 +9,7 @@ declare const Chart: any;
 interface BatchHistory {
   id: string; batch_code: string; flavor_name: string;
   status: string; created_at: string;
-  production?: { manufacturing_date: string; actual_output_kg: number };
+  production?: { manufacturing_date: string; actual_output_kg: number; batch_size?: number };
   packing?: { quantity_kg: number; boxes_count: number; packing_date: string };
   dispatch?: { quantity_dispatched: number; dispatch_date: string; customer_name: string };
 }
@@ -138,6 +138,9 @@ interface BatchHistory {
                           <p style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;margin:0 0 8px;">Production</p>
                           @if (b.production) {
                             <p style="font-size:13px;color:#121212;margin:0 0 4px;">Output: <strong>{{ b.production.actual_output_kg }} kg</strong></p>
+                            @if (b.production.batch_size) {
+                              <p style="font-size:13px;color:#121212;margin:0 0 4px;">Batch Size: <strong>{{ b.production.batch_size | number:'1.0-0' }} units</strong></p>
+                            }
                             <p style="font-size:12px;color:#6B7280;margin:0;">{{ b.production.manufacturing_date | date:'dd MMM yyyy' }}</p>
                           } @else {
                             <p style="font-size:13px;color:#9CA3AF;margin:0;">Not recorded</p>
@@ -157,7 +160,7 @@ interface BatchHistory {
                         <div style="background:#fff;border-radius:8px;border:1px solid #E5E7EB;padding:12px;">
                           <p style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;margin:0 0 8px;">Dispatch</p>
                           @if (b.dispatch) {
-                            <p style="font-size:13px;color:#121212;margin:0 0 4px;">{{ b.dispatch.quantity_dispatched }} kg → {{ b.dispatch.customer_name }}</p>
+                            <p style="font-size:13px;color:#121212;margin:0 0 4px;">{{ b.dispatch.quantity_dispatched | number:'1.0-0' }} units → {{ b.dispatch.customer_name }}</p>
                             <p style="font-size:12px;color:#6B7280;margin:0;">{{ b.dispatch.dispatch_date | date:'dd MMM yyyy' }}</p>
                           } @else {
                             <p style="font-size:13px;color:#9CA3AF;margin:0;">Not dispatched</p>
@@ -250,12 +253,12 @@ export class HistoryComponent implements OnInit, OnDestroy {
 
   exportCSV(): void {
     const rows = this.filtered();
-    const headers = ['Batch Code', 'Flavor', 'Status', 'Date', 'Output kg', 'Packed kg', 'Boxes', 'Dispatched kg', 'Customer'];
+    const headers = ['Batch Code', 'Flavor', 'Status', 'Date', 'Output kg', 'Batch Size (units)', 'Packed kg', 'Boxes', 'Dispatched (units)', 'Customer'];
     const csv = [headers.join(','), ...rows.map(b => [
       b.batch_code, b.flavor_name, b.status, b.created_at.substring(0, 10),
-      b.production?.actual_output_kg ?? '', b.packing?.quantity_kg ?? '',
-      b.packing?.boxes_count ?? '', b.dispatch?.quantity_dispatched ?? '',
-      b.dispatch?.customer_name ?? '',
+      b.production?.actual_output_kg ?? '', b.production?.batch_size ?? '',
+      b.packing?.quantity_kg ?? '', b.packing?.boxes_count ?? '',
+      b.dispatch?.quantity_dispatched ?? '', b.dispatch?.customer_name ?? '',
     ].join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const a = document.createElement('a');
@@ -277,7 +280,7 @@ export class HistoryComponent implements OnInit, OnDestroy {
     this.loading.set(true);
     const [batchRes, prodRes, packRes, dispRes] = await Promise.all([
       this.supabase.client.from('gg_batches').select('id, batch_code, status, created_at, gg_flavors(name)').order('created_at', { ascending: false }).limit(500),
-      this.supabase.client.from('gg_production').select('batch_id, manufacturing_date, actual_output_kg'),
+      this.supabase.client.from('gg_production').select('batch_id, manufacturing_date, actual_output_kg, batch_size'),
       this.supabase.client.from('gg_packing').select('batch_id, quantity_kg, boxes_count, packing_date'),
       this.supabase.client.from('gg_dispatch').select('batch_id, quantity_dispatched, dispatch_date, gg_customers(name)'),
     ]);
@@ -293,7 +296,7 @@ export class HistoryComponent implements OnInit, OnDestroy {
       return {
         id: b.id, batch_code: b.batch_code, status: b.status, created_at: b.created_at,
         flavor_name: b.gg_flavors?.name ?? 'Unknown',
-        production: prod ? { manufacturing_date: prod.manufacturing_date, actual_output_kg: prod.actual_output_kg } : undefined,
+        production: prod ? { manufacturing_date: prod.manufacturing_date, actual_output_kg: prod.actual_output_kg, batch_size: prod.batch_size ?? undefined } : undefined,
         packing: pack ? { quantity_kg: pack.quantity_kg, boxes_count: pack.boxes_count, packing_date: pack.packing_date } : undefined,
         dispatch: disp ? { quantity_dispatched: disp.quantity_dispatched, dispatch_date: disp.dispatch_date, customer_name: disp.gg_customers?.name ?? 'Unknown' } : undefined,
       };

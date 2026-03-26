@@ -249,6 +249,15 @@ export class KanbanComponent {
         return `${kg} kg · ${ev.quantity} boxes`;
       }
     }
+    if (ev.module === 'production') {
+      const size = ev.payload?.['batchSize'];
+      if (size !== undefined && size !== null) {
+        return `${Number(size).toLocaleString()} units`;
+      }
+    }
+    if (ev.module === 'dispatch') {
+      return `${Number(ev.quantity).toLocaleString()} units`;
+    }
     return `${ev.quantity} ${ev.unit}`;
   }
 }

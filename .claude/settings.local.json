@@ -4,7 +4,11 @@
       "Bash(grep -E \"\\\\.ts$\")",
       "Bash(npx ng:*)",
       "Bash(node_modules/.bin/ng build:*)",
-      "Bash(ng --version)"
+      "Bash(ng --version)",
+      "Bash(xargs grep:*)",
+      "Bash(find /c/Users/BHARAT/Documents/GitHub -type f -path *recipes* -name *.ts)",
+      "Bash(find /c/Users/BHARAT/Documents/GitHub -type f -name *.py)",
+      "Bash(find /c/Users/BHARAT/Documents/GitHub/utpad-web -type f -name *production* -o -name production.*)"
     ]
   }
 }

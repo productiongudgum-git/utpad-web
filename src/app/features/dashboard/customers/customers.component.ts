@@ -62,13 +62,13 @@ interface Customer {
           <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 18px;">
             <p style="font-size:12px;color:#6B7280;text-transform:uppercase;font-weight:600;letter-spacing:0.5px;margin:0 0 4px;">Total Dispatched</p>
             <p style="font-size:24px;font-weight:700;color:var(--foreground);margin:0;">
-              {{ grandTotalKg() | number:'1.0-0' }} <span style="font-size:14px;font-weight:400;color:#6B7280;">kg</span>
+              {{ grandTotalKg() | number:'1.0-0' }} <span style="font-size:14px;font-weight:400;color:#6B7280;">units</span>
             </p>
           </div>
           <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 18px;">
             <p style="font-size:12px;color:#6B7280;text-transform:uppercase;font-weight:600;letter-spacing:0.5px;margin:0 0 4px;">Top Customer</p>
             <p style="font-size:16px;font-weight:700;color:var(--foreground);margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ topCustomer()?.name ?? '—' }}</p>
-            <p style="font-size:12px;color:#6B7280;margin:4px 0 0;">{{ topCustomer()?.total_dispatched_kg | number:'1.0-0' }} kg · {{ topCustomer()?.dispatch_count }} dispatches</p>
+            <p style="font-size:12px;color:#6B7280;margin:4px 0 0;">{{ topCustomer()?.total_dispatched_kg | number:'1.0-0' }} units · {{ topCustomer()?.dispatch_count }} dispatches</p>
           </div>
         </div>
 
@@ -93,7 +93,7 @@ interface Customer {
                     {{ volumePct(c) | number:'1.0-1' }}%
                   </span>
                   <span style="font-size:11px;color:#9CA3AF;min-width:50px;text-align:right;flex-shrink:0;">
-                    {{ c.total_dispatched_kg | number:'1.0-0' }} kg
+                    {{ c.total_dispatched_kg | number:'1.0-0' }} units
                   </span>
                 </div>
               }
@@ -222,8 +222,8 @@ interface Customer {
                         {{ c.dispatch_count }} dispatch{{ c.dispatch_count !== 1 ? 'es' : '' }}
                       </span>
                       <span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;background:#dbeafe;border:1px solid #93c5fd;color:#2563eb;padding:3px 9px;border-radius:6px;font-weight:600;">
-                        <span class="material-icons-round" style="font-size:13px;">scale</span>
-                        {{ c.total_dispatched_kg | number:'1.0-1' }} kg
+                        <span class="material-icons-round" style="font-size:13px;">tag</span>
+                        {{ c.total_dispatched_kg | number:'1.0-0' }} units
                       </span>
                       @if (c.last_dispatch_date) {
                         <span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;background:#f9fafb;border:1px solid #E5E7EB;color:#6B7280;padding:3px 9px;border-radius:6px;">
@@ -264,7 +264,7 @@ interface Customer {
                         Dispatch history — {{ c.dispatches.length }} record{{ c.dispatches.length !== 1 ? 's' : '' }}
                       </p>
                       <p style="font-size:11px;color:#6B7280;margin:0;">
-                        {{ c.total_dispatched_kg | number:'1.0-1' }} kg total
+                        {{ c.total_dispatched_kg | number:'1.0-0' }} units total
                       </p>
                     </div>
                     <table style="width:100%;border-collapse:collapse;">
@@ -273,7 +273,7 @@ interface Customer {
                           <th style="text-align:left;padding:9px 20px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Date</th>
                           <th style="text-align:left;padding:9px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Batch</th>
                           <th style="text-align:left;padding:9px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Flavor</th>
-                          <th style="text-align:right;padding:9px 20px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Qty (kg)</th>
+                          <th style="text-align:right;padding:9px 20px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Qty (units)</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -291,8 +291,8 @@ interface Customer {
                               {{ d.flavor_name || '—' }}
                             </td>
                             <td style="padding:10px 20px;text-align:right;">
-                              <span style="font-size:13px;font-weight:700;color:#2563eb;">{{ d.quantity_dispatched | number:'1.0-1' }}</span>
-                              <span style="font-size:11px;color:#9CA3AF;margin-left:3px;">kg</span>
+                              <span style="font-size:13px;font-weight:700;color:#2563eb;">{{ d.quantity_dispatched | number:'1.0-0' }}</span>
+                              <span style="font-size:11px;color:#9CA3AF;margin-left:3px;">units</span>
                             </td>
                           </tr>
                         }
