@@ -21,7 +21,6 @@ interface RecipeRow {
   name: string;
   flavor_id: string;
   flavor_name: string;
-  version: number;
   batch_size_kg: number;
   is_active: boolean;
   ingredients: RecipeIngredient[];
@@ -79,7 +78,7 @@ interface IngLine {
           <form [formGroup]="form" (ngSubmit)="save()">
 
             <!-- Meta fields -->
-            <div class="rcp-meta-grid" style="display:grid;grid-template-columns:2fr 2fr 1fr 1.2fr;gap:14px;margin-bottom:20px;">
+            <div class="rcp-meta-grid" style="display:grid;grid-template-columns:2fr 2fr 1.2fr;gap:14px;margin-bottom:20px;">
               <div>
                 <label class="rcp-label">Recipe Name *</label>
                 <input formControlName="name" class="gg-input" placeholder="e.g. Spearmint Base v2"
@@ -104,11 +103,6 @@ interface IngLine {
                   (valueChange)="onFlavorSelected($event)"
                   (createRequested)="createFlavorFromPicker($event)">
                 </app-searchable-select>
-              </div>
-
-              <div>
-                <label class="rcp-label">Version</label>
-                <input formControlName="version" type="number" min="1" class="gg-input" placeholder="1">
               </div>
 
               <div>
@@ -258,7 +252,6 @@ interface IngLine {
                   <div style="min-width:0;flex:1;">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap;">
                       <span style="font-size:15px;font-weight:700;color:var(--foreground);font-family:'Cabin',sans-serif;">{{ r.name }}</span>
-                      <span style="background:#dbeafe;color:#1d4ed8;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;font-family:monospace;">v{{ r.version }}</span>
                       @if (!r.is_active) {
                         <span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;">Inactive</span>
                       }
@@ -283,7 +276,7 @@ interface IngLine {
                             style="padding:6px 12px;background:#f0fdf4;border:1px solid #01AC51;color:#01AC51;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;">
                       <span class="material-icons-round" style="font-size:14px;">edit</span> Edit
                     </button>
-                    <button (click)="cloneRecipe(r)" title="Duplicate as next version"
+                    <button (click)="cloneRecipe(r)" title="Duplicate recipe"
                             style="padding:6px 12px;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;">
                       <span class="material-icons-round" style="font-size:14px;">content_copy</span> Clone
                     </button>
@@ -442,7 +435,6 @@ export class RecipesAdminComponent implements OnInit {
 
   form = this.fb.nonNullable.group({
     name:          ['', Validators.required],
-    version:       [1, [Validators.required, Validators.min(1)]],
     batch_size_kg: [100, [Validators.required, Validators.min(0.1)]],
   });
 
@@ -484,7 +476,7 @@ export class RecipesAdminComponent implements OnInit {
 
   openNewForm(): void {
     this.editId.set(null);
-    this.form.reset({ name: '', version: this.nextDefaultVersion(), batch_size_kg: 100 });
+    this.form.reset({ name: '', batch_size_kg: 100 });
     this.selectedFlavorId.set('');
     this.ingLines.set([{ ingredientId: '', ingredientName: '', quantity: 0, unit: 'kg' }]);
     this.formError.set('');
@@ -494,7 +486,7 @@ export class RecipesAdminComponent implements OnInit {
 
   startEdit(r: RecipeRow): void {
     this.editId.set(r.id);
-    this.form.setValue({ name: r.name, version: r.version, batch_size_kg: r.batch_size_kg });
+    this.form.setValue({ name: r.name, batch_size_kg: r.batch_size_kg });
     this.selectedFlavorId.set(r.flavor_id);
     this.ingLines.set(
       r.ingredients.length > 0
@@ -516,15 +508,8 @@ export class RecipesAdminComponent implements OnInit {
   }
 
   cloneRecipe(r: RecipeRow): void {
-    const nextVersion = Math.max(
-      ...this.recipes()
-        .filter(x => x.flavor_id === r.flavor_id)
-        .map(x => x.version),
-      r.version
-    ) + 1;
-    const baseName = r.name.replace(/ v\d+$/, '').trim();
     this.editId.set(null);
-    this.form.setValue({ name: `${baseName} v${nextVersion}`, version: nextVersion, batch_size_kg: r.batch_size_kg });
+    this.form.setValue({ name: `${r.name} Copy`, batch_size_kg: r.batch_size_kg });
     this.selectedFlavorId.set(r.flavor_id);
     this.ingLines.set(
       r.ingredients.map(i => ({ ingredientId: i.ingredient_id, ingredientName: i.name, quantity: i.quantity, unit: i.unit }))
@@ -561,7 +546,6 @@ export class RecipesAdminComponent implements OnInit {
       const payload = {
         title: v.name,
         flavor_id: flavorId,
-        version: v.version,
         yield_factor: v.batch_size_kg,
         is_active: true,
       };
@@ -631,7 +615,7 @@ export class RecipesAdminComponent implements OnInit {
     const [{ data: recipesData }, { data: recipeLines }] = await Promise.all([
       this.supabase.client
       .from('gg_recipes')
-      .select('id, name:title, flavor_id, version, batch_size_kg:yield_factor, is_active, gg_flavors(name)')
+      .select('id, name:title, flavor_id, batch_size_kg:yield_factor, is_active, gg_flavors(name)')
       .order('created_at', { ascending: false }),
       this.supabase.client
         .from('recipe_lines')
@@ -657,7 +641,6 @@ export class RecipesAdminComponent implements OnInit {
       name: r.name,
       flavor_id: r.flavor_id,
       flavor_name: r.gg_flavors?.name ?? 'Unknown',
-      version: r.version,
       batch_size_kg: r.batch_size_kg,
       is_active: r.is_active,
       ingredients: (linesByRecipeId.get(r.id) ?? []).map((i: any) => ({
@@ -769,11 +752,6 @@ export class RecipesAdminComponent implements OnInit {
       );
 
     return insertError?.message ?? null;
-  }
-
-  private nextDefaultVersion(): number {
-    if (this.recipes().length === 0) return 1;
-    return Math.max(...this.recipes().map(r => r.version)) + 1;
   }
 
   private showToast(msg: string, kind: 'success' | 'error'): void {
