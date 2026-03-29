@@ -551,7 +551,6 @@ export class RecipesAdminComponent implements OnInit {
       };
 
       const isEdit = this.editId();
-      let recipeId = isEdit;
       if (isEdit) {
         const { error } = await this.supabase.client.from('gg_recipes').update(payload).eq('id', isEdit);
         if (error) { this.formError.set(error.message); return; }
@@ -565,8 +564,7 @@ export class RecipesAdminComponent implements OnInit {
           .select('id')
           .single();
         if (error || !data) { this.formError.set(error?.message ?? 'Failed to create recipe.'); return; }
-        recipeId = data.id;
-        const syncError = await this.replaceRecipeLines(recipeId, ingredients);
+        const syncError = await this.replaceRecipeLines(data.id, ingredients);
         if (syncError) { this.formError.set(syncError); return; }
         this.showToast('Recipe created', 'success');
       }

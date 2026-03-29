@@ -110,8 +110,8 @@ interface IngredientOption { id: string; name: string; }
           </div>
           <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 18px;">
             <p style="font-size:12px;color:#6B7280;text-transform:uppercase;font-weight:600;letter-spacing:0.5px;margin:0 0 4px;">Top Supplier</p>
-            <p style="font-size:16px;font-weight:700;color:var(--foreground);margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ topVendor()?.name ?? '—' }}</p>
-            <p style="font-size:12px;color:#6B7280;margin:4px 0 0;">{{ topVendor()?.total_purchased | number:'1.0-0' }} units purchased</p>
+            <p style="font-size:16px;font-weight:700;color:var(--foreground);margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ topVendor().name }}</p>
+            <p style="font-size:12px;color:#6B7280;margin:4px 0 0;">{{ topVendor().total_purchased | number:'1.0-0' }} units purchased</p>
           </div>
         </div>
       }
