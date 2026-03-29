@@ -65,7 +65,7 @@ interface IngLine {
 
       <!-- ── Recipe form ─────────────────────────────────────────────────── -->
       @if (showForm()) {
-        <div class="recipe-form-card" style="background:var(--card);border-radius:14px;border:1px solid var(--border);padding:24px;margin-bottom:24px;animation:slideDown 0.15s ease;">
+        <div class="recipe-form-card" style="background:var(--card);border-radius:14px;border:1px solid var(--border);padding:24px 24px 28px;margin-bottom:24px;animation:slideDown 0.15s ease;min-height:720px;">
 
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
             <h2 style="font-size:16px;font-weight:700;color:var(--foreground);margin:0;">
@@ -119,7 +119,7 @@ interface IngLine {
             </div>
 
             <!-- Ingredients table -->
-            <div style="margin-bottom:20px;">
+            <div style="margin-bottom:20px;display:flex;flex-direction:column;min-height:440px;">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
                 <label class="rcp-label" style="margin:0;">Ingredients
                   <span style="font-weight:400;color:#9CA3AF;font-size:11px;"> — search existing ingredients or add them inline</span>
@@ -137,7 +137,7 @@ interface IngLine {
               }
 
               @if (ingLines().length > 0) {
-                <div class="recipe-ingredients-shell" style="border:1px solid var(--border);border-radius:10px;overflow:visible;background:var(--card);">
+                <div class="recipe-ingredients-shell" style="border:1px solid var(--border);border-radius:10px;overflow:visible;background:var(--card);flex:1;display:flex;flex-direction:column;min-height:380px;">
                   <!-- Header -->
                   <div style="display:grid;grid-template-columns:1fr 110px 100px 36px;gap:8px;padding:8px 12px;background:#f8f9fa;border-bottom:1px solid var(--border);">
                     <span style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Ingredient</span>
@@ -366,7 +366,9 @@ interface IngLine {
       }
       .rcp-toast-err { background:#dc2626; }
       .recipe-ingredients-scroll {
-        max-height: 320px;
+        min-height: 320px;
+        max-height: 520px;
+        flex: 1 1 auto;
         overflow-y: auto;
         overflow-x: visible;
       }
