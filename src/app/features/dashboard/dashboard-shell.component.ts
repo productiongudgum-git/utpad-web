@@ -126,6 +126,7 @@ export class DashboardShellComponent {
     { label: 'Vendors',     icon: 'storefront',              route: 'vendors' },
     { label: 'Customers',   icon: 'people',                  route: 'customers' },
     { label: 'Team',        icon: 'group',                   route: 'team' },
+    { label: 'Access',      icon: 'admin_panel_settings',    route: 'sessions' },
     { label: 'History',     icon: 'history',                 route: 'history' },
     { label: 'Bills',       icon: 'receipt_long',            route: 'bills' },
   ];

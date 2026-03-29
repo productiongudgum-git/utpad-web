@@ -444,6 +444,7 @@ export class UsersComponent implements OnInit {
     this.saving.set(true);
     const { name, phone } = this.workerForm.getRawValue();
     const phoneTrimmed = phone.trim();
+    const nameTrimmed = name.trim();
 
     // Prevent duplicate workers with the same phone number
     const { data: existing } = await this.supabase.client
@@ -458,12 +459,13 @@ export class UsersComponent implements OnInit {
     }
 
     const workerId = `worker-${phoneTrimmed}-${Date.now()}`;
+    const modules = [...this.selectedModules()];
 
     const { error: workerError } = await this.supabase.client
       .from('ops_workers')
       .insert({
         worker_id: workerId,
-        name: name.trim(),
+        name: nameTrimmed,
         phone: phoneTrimmed,
         worker_role: 'worker',
         active: true,
@@ -477,11 +479,14 @@ export class UsersComponent implements OnInit {
 
     const { error: moduleError } = await this.supabase.client
       .from('ops_worker_module_access')
-      .insert(this.selectedModules().map(module => ({ worker_id: workerId, module })));
+      .insert(modules.map(module => ({ worker_id: workerId, module })));
 
     if (moduleError) {
       this.setStatus(`Worker created but module assignment failed: ${moduleError.message}`, 'error');
     } else {
+      // Sync to gg_users for Android app login (phone-based auth)
+      await this.syncWorkerToGgUsers(nameTrimmed, phoneTrimmed, modules, true);
+
       this.setStatus(`Worker "${name}" created successfully.`, 'success');
       this.workerForm.reset({ name: '', phone: '' });
       this.selectedModules.set(['inwarding']);
@@ -555,6 +560,10 @@ export class UsersComponent implements OnInit {
     if (moduleError) {
       this.setEditStatus(`Details saved but module update failed: ${moduleError.message}`, 'error');
     } else {
+      // Sync to gg_users for Android app login
+      const updatedModules = [...this.editModules()];
+      await this.syncWorkerToGgUsers(name.trim(), phone.trim(), updatedModules, worker.active);
+
       this.setEditStatus('Worker updated successfully.', 'success');
       await this.loadWorkers();
       // Refresh drawer to reflect saved state
@@ -567,20 +576,28 @@ export class UsersComponent implements OnInit {
   // ── Toggle Active ────────────────────────────────────────────
 
   async toggleWorkerActive(worker: OpsWorkerRow): Promise<void> {
+    const newActive = !worker.active;
     const { error } = await this.supabase.client
       .from('ops_workers')
-      .update({ active: !worker.active })
+      .update({ active: newActive })
       .eq('worker_id', worker.worker_id);
 
     if (!error) {
+      // Sync active status to gg_users for Android app
+      if (worker.phone) {
+        await this.supabase.client
+          .from('gg_users')
+          .update({ active: newActive })
+          .eq('mobile_number', worker.phone);
+      }
+
       await this.loadWorkers();
-      // If drawer is open, update its reference
       if (this.selectedWorker()?.worker_id === worker.worker_id) {
         const updated = this.workers().find(w => w.worker_id === worker.worker_id);
         if (updated) this.selectedWorker.set(updated);
       }
       this.setStatus(
-        `Worker "${worker.name}" ${!worker.active ? 'activated' : 'deactivated'}.`,
+        `Worker "${worker.name}" ${newActive ? 'activated' : 'deactivated'}.`,
         'success'
       );
     } else {

@@ -25,6 +25,7 @@ export const routes: Routes = [
       { path: 'vendors', loadComponent: () => import('./features/dashboard/vendors/vendors.component').then(m => m.VendorsComponent) },
       { path: 'customers', loadComponent: () => import('./features/dashboard/customers/customers.component').then(m => m.CustomersComponent) },
       { path: 'team', loadComponent: () => import('./features/dashboard/team/team.component').then(m => m.TeamComponent) },
+      { path: 'sessions', loadComponent: () => import('./features/sessions/sessions.component').then(m => m.SessionsComponent) },
       { path: 'production', loadComponent: () => import('./features/dashboard/production/production.component').then(m => m.ProductionComponent) },
       { path: 'packing', loadComponent: () => import('./features/dashboard/packing/packing.component').then(m => m.PackingComponent) },
       { path: 'dispatch', loadComponent: () => import('./features/dashboard/dispatch/dispatch.component').then(m => m.DispatchComponent) },
