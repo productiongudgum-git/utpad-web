@@ -2,9 +2,9 @@ import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule, DecimalPipe } from '@angular/common';
 import { FormBuilder, ReactiveFormsModule, Validators, FormsModule } from '@angular/forms';
 import { SupabaseService } from '../../../core/supabase.service';
+import { SearchableSelectComponent, SearchableSelectOption } from '../../../shared/components/searchable-select.component';
 
 const UNITS = ['kg', 'g', 'L', 'ml', 'pcs'] as const;
-type Unit = typeof UNITS[number];
 
 interface Flavor     { id: string; name: string; code: string; }
 interface Ingredient { id: string; name: string; default_unit: string; }
@@ -28,6 +28,7 @@ interface RecipeRow {
 }
 
 interface IngLine {
+  ingredientId: string;
   ingredientName: string;
   quantity: number;
   unit: string;
@@ -36,16 +37,8 @@ interface IngLine {
 @Component({
   selector: 'app-recipes-admin',
   standalone: true,
-  imports: [CommonModule, DecimalPipe, ReactiveFormsModule, FormsModule],
+  imports: [CommonModule, DecimalPipe, ReactiveFormsModule, FormsModule, SearchableSelectComponent],
   template: `
-    <!-- ── datalists for comboboxes ─────────────────────────────────────── -->
-    <datalist id="fl-list">
-      @for (f of flavors(); track f.id) { <option [value]="f.name"> }
-    </datalist>
-    <datalist id="ing-list">
-      @for (i of ingredients(); track i.id) { <option [value]="i.name"> }
-    </datalist>
-
     <!-- ── toast ──────────────────────────────────────────────────────────── -->
     @if (toast()) {
       <div class="rcp-toast" [class.rcp-toast-err]="toastKind() === 'error'">
@@ -98,18 +91,19 @@ interface IngLine {
 
               <div>
                 <label class="rcp-label">Flavor *
-                  <span style="font-weight:400;color:#9CA3AF;">(type or pick from list)</span>
+                  <span style="font-weight:400;color:#9CA3AF;">(search existing or add new)</span>
                 </label>
-                <input [(ngModel)]="flavorNameInput" [ngModelOptions]="{standalone:true}"
-                       list="fl-list" class="gg-input"
-                       placeholder="e.g. Strawberry, Charcoal Spearmint"
-                       (input)="onFlavorInput()">
-                @if (flavorHint()) {
-                  <p style="font-size:11px;margin:3px 0 0;"
-                     [style.color]="flavorIsNew() ? '#d97706' : '#16a34a'">
-                    {{ flavorHint() }}
-                  </p>
-                }
+                <app-searchable-select
+                  [options]="flavorOptions()"
+                  [value]="selectedFlavorId()"
+                  placeholder="Select or add a flavor"
+                  searchPlaceholder="Search flavors..."
+                  emptyText="No matching flavors."
+                  createLabelPrefix="Add flavor"
+                  [allowCreate]="true"
+                  (valueChange)="onFlavorSelected($event)"
+                  (createRequested)="createFlavorFromPicker($event)">
+                </app-searchable-select>
               </div>
 
               <div>
@@ -128,7 +122,7 @@ interface IngLine {
             <div style="margin-bottom:20px;">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
                 <label class="rcp-label" style="margin:0;">Ingredients
-                  <span style="font-weight:400;color:#9CA3AF;font-size:11px;"> — type to search existing ingredients</span>
+                  <span style="font-weight:400;color:#9CA3AF;font-size:11px;"> — search existing ingredients or add them inline</span>
                 </label>
                 <button type="button" (click)="addIngLine()"
                         style="padding:5px 12px;background:#f0fdf4;border:1px solid #01AC51;color:#01AC51;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;">
@@ -154,10 +148,17 @@ interface IngLine {
                   <!-- Rows -->
                   @for (line of ingLines(); track $index) {
                     <div style="display:grid;grid-template-columns:1fr 110px 100px 36px;gap:8px;padding:8px 12px;border-bottom:1px solid #f3f4f6;align-items:center;">
-                      <input [(ngModel)]="line.ingredientName" [ngModelOptions]="{standalone:true}"
-                             list="ing-list" class="gg-input" placeholder="Ingredient name…"
-                             style="font-size:13px;"
-                             (change)="onIngNameChange(line)">
+                      <app-searchable-select
+                        [options]="ingredientOptions()"
+                        [value]="line.ingredientId"
+                        placeholder="Select ingredient"
+                        searchPlaceholder="Search ingredients..."
+                        emptyText="No matching ingredients."
+                        createLabelPrefix="Add ingredient"
+                        [allowCreate]="true"
+                        (valueChange)="onIngredientSelected($index, $event)"
+                        (createRequested)="createIngredientFromPicker($index, $event)">
+                      </app-searchable-select>
                       <input [(ngModel)]="line.quantity" [ngModelOptions]="{standalone:true}"
                              type="number" min="0" step="0.001" class="gg-input"
                              placeholder="0" style="font-size:13px;">
@@ -390,14 +391,27 @@ export class RecipesAdminComponent implements OnInit {
   toast      = signal('');
   toastKind  = signal<'success' | 'error'>('success');
 
-  // Flavor combobox
-  flavorNameInput = '';
-  flavorHint = signal('');
-  flavorIsNew = signal(false);
+  selectedFlavorId = signal('');
 
   // Search
   rawSearch = '';
   searchSig = signal('');
+
+  readonly flavorOptions = computed<SearchableSelectOption[]>(() =>
+    this.flavors().map((flavor) => ({
+      id: flavor.id,
+      label: flavor.name,
+      sublabel: flavor.code ? `Code: ${flavor.code}` : undefined,
+    })),
+  );
+
+  readonly ingredientOptions = computed<SearchableSelectOption[]>(() =>
+    this.ingredients().map((ingredient) => ({
+      id: ingredient.id,
+      label: ingredient.name,
+      sublabel: ingredient.default_unit ? `Default unit: ${ingredient.default_unit}` : undefined,
+    })),
+  );
 
   readonly filtered = computed(() => {
     const q = this.searchSig().toLowerCase().trim();
@@ -427,35 +441,30 @@ export class RecipesAdminComponent implements OnInit {
   // ── Ingredient lines ──────────────────────────────────────────────────
 
   addIngLine(): void {
-    this.ingLines.update(l => [...l, { ingredientName: '', quantity: 0, unit: 'kg' }]);
+    this.ingLines.update(l => [...l, { ingredientId: '', ingredientName: '', quantity: 0, unit: 'kg' }]);
   }
 
   removeIngLine(i: number): void {
     this.ingLines.update(l => l.filter((_, idx) => idx !== i));
   }
 
-  onIngNameChange(line: IngLine): void {
-    const match = this.ingredients().find(
-      i => i.name.toLowerCase() === line.ingredientName.toLowerCase()
-    );
-    if (match && line.unit === 'kg' && match.default_unit) {
-      line.unit = match.default_unit as Unit;
-    }
+  onIngredientSelected(index: number, ingredientId: string): void {
+    const match = this.ingredients().find(i => i.id === ingredientId);
+    if (!match) return;
+    this.ingLines.update(lines => lines.map((line, currentIndex) =>
+      currentIndex === index
+        ? {
+            ...line,
+            ingredientId: match.id,
+            ingredientName: match.name,
+            unit: match.default_unit || line.unit,
+          }
+        : line,
+    ));
   }
 
-  // ── Flavor combobox ───────────────────────────────────────────────────
-
-  onFlavorInput(): void {
-    const name = this.flavorNameInput.trim();
-    if (!name) { this.flavorHint.set(''); return; }
-    const existing = this.flavors().find(f => f.name.toLowerCase() === name.toLowerCase());
-    if (existing) {
-      this.flavorIsNew.set(false);
-      this.flavorHint.set('✓ Existing flavor');
-    } else {
-      this.flavorIsNew.set(true);
-      this.flavorHint.set('New flavor — will be created on save');
-    }
+  onFlavorSelected(flavorId: string): void {
+    this.selectedFlavorId.set(flavorId);
   }
 
   // ── Form open/close ───────────────────────────────────────────────────
@@ -463,9 +472,8 @@ export class RecipesAdminComponent implements OnInit {
   openNewForm(): void {
     this.editId.set(null);
     this.form.reset({ name: '', version: this.nextDefaultVersion(), batch_size_kg: 100 });
-    this.flavorNameInput = '';
-    this.flavorHint.set('');
-    this.ingLines.set([{ ingredientName: '', quantity: 0, unit: 'kg' }]);
+    this.selectedFlavorId.set('');
+    this.ingLines.set([{ ingredientId: '', ingredientName: '', quantity: 0, unit: 'kg' }]);
     this.formError.set('');
     this.showForm.set(true);
     setTimeout(() => document.querySelector('.recipe-form-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
@@ -474,13 +482,11 @@ export class RecipesAdminComponent implements OnInit {
   startEdit(r: RecipeRow): void {
     this.editId.set(r.id);
     this.form.setValue({ name: r.name, version: r.version, batch_size_kg: r.batch_size_kg });
-    this.flavorNameInput = r.flavor_name;
-    this.flavorHint.set('✓ Existing flavor');
-    this.flavorIsNew.set(false);
+    this.selectedFlavorId.set(r.flavor_id);
     this.ingLines.set(
       r.ingredients.length > 0
-        ? r.ingredients.map(i => ({ ingredientName: i.name, quantity: i.quantity, unit: i.unit }))
-        : [{ ingredientName: '', quantity: 0, unit: 'kg' }]
+        ? r.ingredients.map(i => ({ ingredientId: i.ingredient_id, ingredientName: i.name, quantity: i.quantity, unit: i.unit }))
+        : [{ ingredientId: '', ingredientName: '', quantity: 0, unit: 'kg' }]
     );
     this.formError.set('');
     this.showForm.set(true);
@@ -492,8 +498,7 @@ export class RecipesAdminComponent implements OnInit {
     this.editId.set(null);
     this.formError.set('');
     this.form.reset();
-    this.flavorNameInput = '';
-    this.flavorHint.set('');
+    this.selectedFlavorId.set('');
     this.ingLines.set([]);
   }
 
@@ -507,11 +512,9 @@ export class RecipesAdminComponent implements OnInit {
     const baseName = r.name.replace(/ v\d+$/, '').trim();
     this.editId.set(null);
     this.form.setValue({ name: `${baseName} v${nextVersion}`, version: nextVersion, batch_size_kg: r.batch_size_kg });
-    this.flavorNameInput = r.flavor_name;
-    this.flavorHint.set('✓ Existing flavor');
-    this.flavorIsNew.set(false);
+    this.selectedFlavorId.set(r.flavor_id);
     this.ingLines.set(
-      r.ingredients.map(i => ({ ingredientName: i.name, quantity: i.quantity, unit: i.unit }))
+      r.ingredients.map(i => ({ ingredientId: i.ingredient_id, ingredientName: i.name, quantity: i.quantity, unit: i.unit }))
     );
     this.formError.set('');
     this.showForm.set(true);
@@ -524,9 +527,9 @@ export class RecipesAdminComponent implements OnInit {
     this.form.markAllAsTouched();
     if (this.form.invalid) return;
 
-    const flavorName = this.flavorNameInput.trim();
-    if (!flavorName) {
-      this.formError.set('Please enter or select a flavor.');
+    const flavorId = this.selectedFlavorId();
+    if (!flavorId) {
+      this.formError.set('Please select a flavor.');
       return;
     }
 
@@ -534,23 +537,10 @@ export class RecipesAdminComponent implements OnInit {
     this.formError.set('');
 
     try {
-      // 1. Resolve or create flavor
-      const flavorId = await this.resolveFlavorId(flavorName);
-      if (!flavorId) {
-        this.formError.set('Failed to create flavor. Please try again.');
-        return;
-      }
-
-      // 2. Resolve ingredient IDs
-      const validLines = this.ingLines().filter(l => l.ingredientName.trim() && l.quantity > 0);
+      const validLines = this.ingLines().filter(l => l.ingredientId && l.quantity > 0);
       const ingredients: Array<{ ingredient_id: string; quantity: number; unit: string }> = [];
       for (const line of validLines) {
-        const ingId = await this.resolveIngredientId(line);
-        if (!ingId) {
-          this.formError.set(`Could not find or create ingredient "${line.ingredientName}". Please check the name.`);
-          return;
-        }
-        ingredients.push({ ingredient_id: ingId, quantity: line.quantity, unit: line.unit });
+        ingredients.push({ ingredient_id: line.ingredientId, quantity: line.quantity, unit: line.unit });
       }
 
       // 3. Upsert recipe
@@ -659,38 +649,56 @@ export class RecipesAdminComponent implements OnInit {
 
   // ── Helpers ───────────────────────────────────────────────────────────
 
-  private async resolveFlavorId(name: string): Promise<string | null> {
-    const existing = this.flavors().find(f => f.name.toLowerCase() === name.toLowerCase());
-    if (existing) return existing.id;
+  async createFlavorFromPicker(name: string): Promise<void> {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const existing = this.flavors().find(f => f.name.toLowerCase() === trimmed.toLowerCase());
+    if (existing) {
+      this.selectedFlavorId.set(existing.id);
+      return;
+    }
 
-    // Create new flavor
-    const code = name.replace(/\s+/g, '').toUpperCase().slice(0, 6);
+    const code = trimmed.replace(/\s+/g, '').toUpperCase().slice(0, 6) || 'FLAVOR';
     const { data, error } = await this.supabase.client
       .from('gg_flavors')
-      .insert({ name, code, active: true })
+      .insert({ name: trimmed, code, active: true })
       .select('id, name, code')
       .single();
-    if (error || !data) return null;
+
+    if (error || !data) {
+      this.formError.set(error?.message ?? 'Failed to add flavor.');
+      return;
+    }
 
     this.flavors.update(list => [...list, data].sort((a, b) => a.name.localeCompare(b.name)));
-    return data.id;
+    this.selectedFlavorId.set(data.id);
   }
 
-  private async resolveIngredientId(line: IngLine): Promise<string | null> {
-    const name = line.ingredientName.trim();
-    const existing = this.ingredients().find(i => i.name.toLowerCase() === name.toLowerCase());
-    if (existing) return existing.id;
+  async createIngredientFromPicker(index: number, name: string): Promise<void> {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const currentLine = this.ingLines()[index];
+    if (!currentLine) return;
 
-    // Auto-create ingredient with selected unit as default
+    const existing = this.ingredients().find(i => i.name.toLowerCase() === trimmed.toLowerCase());
+    if (existing) {
+      this.onIngredientSelected(index, existing.id);
+      return;
+    }
+
     const { data, error } = await this.supabase.client
       .from('gg_ingredients')
-      .insert({ name, default_unit: line.unit, active: true })
+      .insert({ name: trimmed, default_unit: currentLine.unit, active: true })
       .select('id, name, default_unit')
       .single();
-    if (error || !data) return null;
+
+    if (error || !data) {
+      this.formError.set(error?.message ?? `Failed to add ingredient "${trimmed}".`);
+      return;
+    }
 
     this.ingredients.update(list => [...list, data].sort((a, b) => a.name.localeCompare(b.name)));
-    return data.id;
+    this.onIngredientSelected(index, data.id);
   }
 
   private nextDefaultVersion(): number {

@@ -3,11 +3,12 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SupabaseService } from '../../../core/supabase.service';
 import { ProductionBatch, FlavorDefinition } from '../../../shared/models/manufacturing.models';
+import { SearchableSelectComponent, SearchableSelectOption } from '../../../shared/components/searchable-select.component';
 
 @Component({
   selector: 'app-production',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, SearchableSelectComponent],
   styles: [`
     .wizard-card {
       background: #fff; border-radius: 16px; border: 1px solid #E5E7EB;
@@ -90,23 +91,32 @@ import { ProductionBatch, FlavorDefinition } from '../../../shared/models/manufa
             <!-- Flavor Selection -->
             <div>
               <label class="field-label">Flavor *</label>
-              <select [(ngModel)]="newFlavorId" class="beautiful-input" style="font-size:14px;appearance:none;background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M6 8l4 4 4-4' stroke='%236B7280' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E&quot;);background-repeat:no-repeat;background-position:right 12px center;background-size:16px;padding-right:40px;">
-                <option value="">-- Select Flavor --</option>
-                @for (f of flavors(); track f.id) {
-                  <option [value]="f.id">{{ f.name }} ({{ f.code }})</option>
-                }
-              </select>
+              <app-searchable-select
+                [options]="flavorOptions()"
+                [value]="newFlavorId"
+                placeholder="Select a flavor"
+                searchPlaceholder="Search flavors..."
+                emptyText="No flavors found."
+                createLabelPrefix="Add flavor"
+                [allowCreate]="true"
+                (valueChange)="newFlavorId = $event"
+                (createRequested)="createFlavor($event)">
+              </app-searchable-select>
             </div>
 
             <!-- SKU / Recipe -->
             <div>
               <label class="field-label">Recipe</label>
-              <select [(ngModel)]="newRecipeId" class="beautiful-input" style="font-size:14px;appearance:none;background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M6 8l4 4 4-4' stroke='%236B7280' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E&quot;);background-repeat:no-repeat;background-position:right 12px center;background-size:16px;padding-right:40px;">
-                <option value="">-- Select Recipe --</option>
-                @for (r of recipes(); track r.id) {
-                  <option [value]="r.id">{{ r.name }} ({{ r.code }})</option>
-                }
-              </select>
+              <app-searchable-select
+                [options]="recipeOptions()"
+                [value]="newRecipeId"
+                placeholder="Select a recipe"
+                searchPlaceholder="Search recipes..."
+                emptyText="No recipes found."
+                createLabelPrefix="Add recipe"
+                [allowCreate]="false"
+                (valueChange)="newRecipeId = $event">
+              </app-searchable-select>
             </div>
 
             <!-- Worker -->
@@ -227,6 +237,22 @@ export class ProductionComponent implements OnInit {
   newPlannedYield: number | null = null;
   newActualYield: number | null = null;
 
+  readonly flavorOptions = computed<SearchableSelectOption[]>(() =>
+    this.flavors().map((flavor) => ({
+      id: flavor.id,
+      label: flavor.name,
+      sublabel: flavor.code ? `Code: ${flavor.code}` : undefined,
+    })),
+  );
+
+  readonly recipeOptions = computed<SearchableSelectOption[]>(() =>
+    this.recipes().map((recipe) => ({
+      id: recipe.id,
+      label: recipe.name,
+      sublabel: recipe.code ? `Code: ${recipe.code}` : undefined,
+    })),
+  );
+
   ngOnInit(): void {
     this.load();
     this.loadFlavors();
@@ -262,10 +288,36 @@ export class ProductionComponent implements OnInit {
   async loadRecipes(): Promise<void> {
     const { data } = await this.supabase.client
       .from('gg_recipes')
-      .select('id, title, code, is_active')
+      .select('id, name, code, is_active')
       .eq('is_active', true)
-      .order('title');
-    if (data) this.recipes.set(data.map((r: any) => ({ id: r.id, name: r.title, code: r.code })));
+      .order('name');
+    if (data) this.recipes.set(data.map((r: any) => ({ id: r.id, name: r.name, code: r.code })));
+  }
+
+  async createFlavor(name: string): Promise<void> {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+
+    const existing = this.flavors().find((flavor) => flavor.name.toLowerCase() === trimmed.toLowerCase());
+    if (existing) {
+      this.newFlavorId = existing.id;
+      return;
+    }
+
+    const code = trimmed.replace(/\s+/g, '').toUpperCase().slice(0, 6) || 'FLAVOR';
+    const { data, error } = await this.supabase.client
+      .from('gg_flavors')
+      .insert({ name: trimmed, code, active: true })
+      .select('id, name, code, active')
+      .single();
+
+    if (error || !data) {
+      this.formError.set(error?.message ?? 'Failed to create flavor.');
+      return;
+    }
+
+    this.flavors.update((list) => [...list, data as FlavorDefinition].sort((a, b) => a.name.localeCompare(b.name)));
+    this.newFlavorId = data.id;
   }
 
   async submitEntry(): Promise<void> {
