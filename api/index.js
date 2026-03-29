@@ -7,12 +7,14 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zoemonbualktnxhpbebv.supabase.co';
-const SUPABASE_PROJECT_REF = process.env.SUPABASE_PROJECT_REF || 'zoemonbualktnxhpbebv';
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://hafaxgyaxmypmmpbemos.supabase.co';
+const SUPABASE_PROJECT_REF = process.env.SUPABASE_PROJECT_REF || 'hafaxgyaxmypmmpbemos';
 const SUPABASE_PUBLISHABLE_KEY =
-  process.env.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_Zu2MWJXLGRLh66nmInx3dA_zqeE3nIY';
+  process.env.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_3mcShpumSr9RukhNVP2osQ_PUWowf0o';
 const SUPABASE_SECRET_KEY =
   process.env.SUPABASE_SECRET_KEY || '';
+const SUPABASE_ANON_KEY =
+  process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhhZmF4Z3lheG15cG1tcGJlbW9zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3Mzc4NjEsImV4cCI6MjA4OTMxMzg2MX0.1ldXX5lOVQh-tOrP15HyNhA3aDs5jy1vLZkQEE6VJq4';
 const SUPABASE_REST_BASE_URL = `${SUPABASE_URL.replace(/\/+$/, '')}/rest/v1`;
 const SUPABASE_ENABLED = Boolean(SUPABASE_URL && SUPABASE_SECRET_KEY);
 
@@ -973,7 +975,7 @@ app.post('/api/v1/auth/login/email', async (req, res) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        apikey: SUPABASE_PUBLISHABLE_KEY,
+        apikey: SUPABASE_ANON_KEY,
       },
       body: JSON.stringify({ email, password }),
     });

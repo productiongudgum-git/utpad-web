@@ -50,7 +50,7 @@ export class InventoryService {
   async loadRawMaterials(): Promise<void> {
     const { data, error } = await this.supabase.client
       .from('inventory_raw_materials')
-      .select('*, ingredient:recipe_ingredients(id,name,unit,active)')
+      .select('*, ingredient:gg_ingredients(id,name,default_unit,active)')
       .order('ingredient_id');
     if (!error && data) this._rawMaterials.set(data as InventoryRawMaterial[]);
   }
@@ -58,7 +58,7 @@ export class InventoryService {
   async loadFinishedGoods(): Promise<void> {
     const { data, error } = await this.supabase.client
       .from('inventory_finished_goods')
-      .select('*, sku:flavor_definitions(id,name,code), batch:production_batches(batch_code,production_date,status)')
+      .select('*, sku:gg_flavors(id,name,code)')
       .gt('boxes_available', 0)
       .order('sku_id');
     if (!error && data) this._finishedGoods.set(data as InventoryFinishedGoods[]);

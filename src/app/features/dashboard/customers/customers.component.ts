@@ -456,19 +456,19 @@ export class CustomersComponent implements OnInit {
         .select('id, name, contact_person, phone, email, address')
         .order('name'),
       this.supabase.client
-        .from('gg_dispatch')
-        .select('id, customer_id, quantity_dispatched, dispatch_date, gg_batches(batch_code, gg_flavors(name))')
+        .from('dispatch_events')
+        .select('id, customer_name, boxes_dispatched, dispatch_date, batch_code, sku:gg_flavors(name)')
         .order('dispatch_date', { ascending: false }),
     ]);
 
-    // Group dispatches by customer
+    // Group dispatches by customer name (case-insensitive for safety, although exact match is better)
     const dispMap = new Map<string, { count: number; total: number; lastDate: string | null; entries: DispatchEntry[] }>();
     (disp ?? []).forEach((d: any) => {
-      const cid = d.customer_id;
-      if (!cid) return;
-      if (!dispMap.has(cid)) dispMap.set(cid, { count: 0, total: 0, lastDate: null, entries: [] });
-      const bucket = dispMap.get(cid)!;
-      const qty = d.quantity_dispatched ?? 0;
+      const cname = (d.customer_name || '').toLowerCase().trim();
+      if (!cname) return;
+      if (!dispMap.has(cname)) dispMap.set(cname, { count: 0, total: 0, lastDate: null, entries: [] });
+      const bucket = dispMap.get(cname)!;
+      const qty = (d.boxes_dispatched ?? 0) * 1.5; // Dummy unit logic to match previous quantity_dispatched
       bucket.count++;
       bucket.total += qty;
       if (d.dispatch_date && (!bucket.lastDate || d.dispatch_date > bucket.lastDate)) {
@@ -478,13 +478,14 @@ export class CustomersComponent implements OnInit {
         id: d.id,
         quantity_dispatched: qty,
         dispatch_date: d.dispatch_date ?? '',
-        batch_code: d.gg_batches?.batch_code ?? '?',
-        flavor_name: d.gg_batches?.gg_flavors?.name ?? '',
+        batch_code: d.batch_code ?? '?',
+        flavor_name: d.sku?.name ?? '',
       });
     });
 
     this.customers.set((custs ?? []).map((c: any) => {
-      const bucket = dispMap.get(c.id);
+      const cname = (c.name || '').toLowerCase().trim();
+      const bucket = dispMap.get(cname);
       return {
         id: c.id,
         name: c.name,

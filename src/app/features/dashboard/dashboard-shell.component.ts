@@ -114,17 +114,20 @@ export class DashboardShellComponent {
   sidebarOpen = signal(false);
 
   navItems: NavItem[] = [
-    { label: 'Dashboard',   icon: 'dashboard',       route: 'home' },
-    { label: 'Live Kanban', icon: 'view_kanban',      route: 'kanban' },
-    { label: 'Recipes',     icon: 'science',          route: 'recipes' },
-    { label: 'Inventory',   icon: 'inventory_2',      route: 'inventory' },
-    { label: 'Ingredients', icon: 'category',         route: 'ingredients' },
-    { label: 'Flavors',     icon: 'local_dining',     route: 'flavors' },
-    { label: 'Vendors',     icon: 'storefront',       route: 'vendors' },
-    { label: 'Customers',   icon: 'people',           route: 'customers' },
-    { label: 'Team',        icon: 'group',            route: 'team' },
-    { label: 'History',     icon: 'history',          route: 'history' },
-    { label: 'Bills',       icon: 'receipt_long',     route: 'bills' },
+    { label: 'Dashboard',   icon: 'dashboard',              route: 'home' },
+    { label: 'Live Kanban', icon: 'view_kanban',             route: 'kanban' },
+    { label: 'Production',  icon: 'precision_manufacturing', route: 'production' },
+    { label: 'Packing',     icon: 'inventory_2',             route: 'packing' },
+    { label: 'Dispatch',    icon: 'local_shipping',          route: 'dispatch' },
+    { label: 'Recipes',     icon: 'science',                 route: 'recipes' },
+    { label: 'Inventory',   icon: 'inventory_2',             route: 'inventory' },
+    { label: 'Ingredients', icon: 'category',                route: 'ingredients' },
+    { label: 'Flavors',     icon: 'local_dining',            route: 'flavors' },
+    { label: 'Vendors',     icon: 'storefront',              route: 'vendors' },
+    { label: 'Customers',   icon: 'people',                  route: 'customers' },
+    { label: 'Team',        icon: 'group',                   route: 'team' },
+    { label: 'History',     icon: 'history',                 route: 'history' },
+    { label: 'Bills',       icon: 'receipt_long',            route: 'bills' },
   ];
 
   userName = () => this.authService.currentUser()?.name ?? 'Admin User';

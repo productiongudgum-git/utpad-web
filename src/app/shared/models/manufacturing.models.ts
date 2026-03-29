@@ -38,17 +38,20 @@ export interface RecipeLine {
 }
 
 export interface ProductionBatch {
+  id?: string;
   batch_code: string;
   sku_id: string;
   recipe_id: string;
   production_date: string;
   worker_id: string;
+  flavor_id: string | null;
   status: 'open' | 'packed';
   planned_yield: number | null;
   actual_yield: number | null;
   created_at: string;
   // Joined
   sku?: FlavorDefinition;
+  flavor?: FlavorDefinition;
 }
 
 export interface ProductionBatchIngredient {
@@ -65,10 +68,13 @@ export interface ProductionBatchIngredient {
 export interface PackingSession {
   id: string;
   batch_code: string;
+  flavor_id: string | null;
   session_date: string;
   worker_id: string;
   boxes_packed: number;
   created_at: string;
+  // Joined
+  flavor?: FlavorDefinition;
 }
 
 export interface DispatchEvent {
@@ -99,16 +105,17 @@ export interface ReturnsEvent {
 export interface InwardEvent {
   id: string;
   ingredient_id: string;
+  vendor_id: string | null;
   qty: number;
   unit: string;
   inward_date: string;
   expiry_date: string | null;
   lot_ref: string | null;
-  supplier: string | null;
   worker_id: string;
   created_at: string;
   // Joined
   ingredient?: RecipeIngredient;
+  vendor?: { name: string };
 }
 
 export interface InventoryRawMaterial {

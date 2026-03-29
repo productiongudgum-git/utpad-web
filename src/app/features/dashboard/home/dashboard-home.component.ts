@@ -232,42 +232,43 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
 
       const [batchRes, prodRes, dispRes, stockRes, prodActivityRes, packActivityRes, dispActivityRes, trendRes] = await Promise.all([
         // Active batches (status != 'completed')
-        this.supabase.client.from('gg_batches').select('id', { count: 'exact', head: true })
+        this.supabase.client.from('production_batches').select('id', { count: 'exact', head: true })
           .in('status', ['production', 'packing', 'dispatch']),
         // Total production kg
-        this.supabase.client.from('gg_production').select('actual_output_kg'),
-        // Total dispatched kg
-        this.supabase.client.from('gg_dispatch').select('quantity_dispatched'),
+        this.supabase.client.from('production_batches').select('actual_yield'),
+        // Total dispatched boxes (we'll estimate kg)
+        this.supabase.client.from('dispatch_events').select('boxes_dispatched'),
         // Low stock ingredients
         this.supabase.client.from('gg_ingredients').select('id, current_stock, reorder_point'),
         // Recent production activity
-        this.supabase.client.from('gg_production')
-          .select('id, actual_output_kg, manufacturing_date, created_at, batch_id, gg_batches(batch_code)')
+        this.supabase.client.from('production_batches')
+          .select('id, actual_yield, production_date, created_at, batch_code')
           .order('created_at', { ascending: false }).limit(5),
         // Recent packing activity
-        this.supabase.client.from('gg_packing')
-          .select('id, quantity_kg, boxes_count, packing_date, created_at, batch_id, gg_batches(batch_code)')
+        this.supabase.client.from('packing_sessions')
+          .select('id, boxes_packed, session_date, created_at, batch_code')
           .order('created_at', { ascending: false }).limit(5),
         // Recent dispatch activity
-        this.supabase.client.from('gg_dispatch')
-          .select('id, quantity_dispatched, dispatch_date, created_at, batch_id, gg_batches(batch_code)')
+        this.supabase.client.from('dispatch_events')
+          .select('id, boxes_dispatched, dispatch_date, created_at, batch_code')
           .order('created_at', { ascending: false }).limit(5),
         // 30-day production trend
-        this.supabase.client.from('gg_production')
-          .select('manufacturing_date, actual_output_kg')
-          .gte('manufacturing_date', thirtyDaysAgo)
-          .order('manufacturing_date', { ascending: true }),
+        this.supabase.client.from('production_batches')
+          .select('production_date, actual_yield')
+          .gte('production_date', thirtyDaysAgo)
+          .order('production_date', { ascending: true }),
       ]);
 
       // KPI calculations
-      const totalProd = (prodRes.data ?? []).reduce((s: number, r: any) => s + (r.actual_output_kg ?? 0), 0);
-      const totalDisp = (dispRes.data ?? []).reduce((s: number, r: any) => s + (r.quantity_dispatched ?? 0), 0);
+      const totalProd = (prodRes.data ?? []).reduce((s: number, r: any) => s + (r.actual_yield ?? 0), 0);
+      const totalDispBoxes = (dispRes.data ?? []).reduce((s: number, r: any) => s + (r.boxes_dispatched ?? 0), 0);
+      const totalDispKg = totalDispBoxes * 1.5; // Dummy conversion: 1 box = 1.5kg
       const lowStock = (stockRes.data ?? []).filter((i: any) => (i.current_stock ?? 0) <= (i.reorder_point ?? 0)).length;
 
       this.kpi.set({
         activeBatches: batchRes.count ?? 0,
         totalProductionKg: totalProd,
-        dispatchedKg: totalDisp,
+        dispatchedKg: totalDispKg,
         lowStockCount: lowStock,
       });
 
@@ -278,7 +279,7 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
         allActivities.push({
           type: 'production',
           label: `Production logged`,
-          detail: `${(r.gg_batches as any)?.batch_code ?? 'Batch'} — ${r.actual_output_kg ?? 0} kg output`,
+          detail: `${r.batch_code ?? 'Batch'} — ${r.actual_yield ?? 0} kg output`,
           time: this.relTime(r.created_at),
           created_at: r.created_at,
           icon: 'precision_manufacturing',
@@ -290,7 +291,7 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
         allActivities.push({
           type: 'packing',
           label: `Packing completed`,
-          detail: `${(r.gg_batches as any)?.batch_code ?? 'Batch'} — ${r.quantity_kg ?? 0} kg, ${r.boxes_count ?? 0} boxes`,
+          detail: `${r.batch_code ?? 'Batch'} — ${r.boxes_packed ?? 0} boxes`,
           time: this.relTime(r.created_at),
           created_at: r.created_at,
           icon: 'inventory_2',
@@ -302,7 +303,7 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
         allActivities.push({
           type: 'dispatch',
           label: `Dispatch sent`,
-          detail: `${(r.gg_batches as any)?.batch_code ?? 'Batch'} — ${r.quantity_dispatched ?? 0} kg dispatched`,
+          detail: `${r.batch_code ?? 'Batch'} — ${r.boxes_dispatched ?? 0} boxes dispatched`,
           time: this.relTime(r.created_at),
           created_at: r.created_at,
           icon: 'local_shipping',
@@ -321,8 +322,9 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
         byDay[d] = 0;
       }
       (trendRes.data ?? []).forEach((r: any) => {
-        const d = (r.manufacturing_date ?? '').substring(0, 10);
-        if (d in byDay) byDay[d] += r.actual_output_kg ?? 0;
+        if (!r.production_date) return;
+        const d = r.production_date.substring(0, 10);
+        if (d in byDay) byDay[d] += r.actual_yield ?? 0;
       });
 
       const days: TrendDay[] = Object.entries(byDay).map(([date, value]) => {

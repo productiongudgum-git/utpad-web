@@ -278,27 +278,44 @@ export class HistoryComponent implements OnInit, OnDestroy {
 
   private async loadData(): Promise<void> {
     this.loading.set(true);
-    const [batchRes, prodRes, packRes, dispRes] = await Promise.all([
-      this.supabase.client.from('gg_batches').select('id, batch_code, status, created_at, gg_flavors(name)').order('created_at', { ascending: false }).limit(500),
-      this.supabase.client.from('gg_production').select('batch_id, manufacturing_date, actual_output_kg, batch_size'),
-      this.supabase.client.from('gg_packing').select('batch_id, quantity_kg, boxes_count, packing_date'),
-      this.supabase.client.from('gg_dispatch').select('batch_id, quantity_dispatched, dispatch_date, gg_customers(name)'),
+    const [prodRes, packRes, dispRes] = await Promise.all([
+      this.supabase.client.from('production_batches').select('id, batch_code, status, created_at, actual_yield, planned_yield, production_date, flavor_id, flavor:gg_flavors!production_batches_flavor_id_fkey(name)').order('created_at', { ascending: false }).limit(500),
+      this.supabase.client.from('packing_sessions').select('id, batch_code, flavor_id, boxes_packed, session_date'),
+      this.supabase.client.from('dispatch_events').select('id, batch_code, sku_id, boxes_dispatched, dispatch_date, customer_name'),
     ]);
 
-    const prodMap = new Map((prodRes.data ?? []).map((p: any) => [p.batch_id, p]));
-    const packMap = new Map((packRes.data ?? []).map((p: any) => [p.batch_id, p]));
-    const dispMap = new Map((dispRes.data ?? []).map((d: any) => [d.batch_id, d]));
+    // Group packing by batch_code and flavor_id
+    const packMap = new Map<string, any>();
+    (packRes.data ?? []).forEach((p: any) => {
+      const key = `${p.batch_code}_${p.flavor_id}`;
+      if (!packMap.has(key)) packMap.set(key, { quantity_kg: 0, boxes_count: 0, packing_date: p.session_date });
+      const current = packMap.get(key);
+      current.boxes_count += (p.boxes_packed ?? 0);
+      current.quantity_kg += (p.boxes_packed ?? 0) * 1.5; // Dummy conversion logic
+      current.packing_date = p.session_date > current.packing_date ? p.session_date : current.packing_date;
+    });
 
-    const list: BatchHistory[] = (batchRes.data ?? []).map((b: any) => {
-      const prod = prodMap.get(b.id);
-      const pack = packMap.get(b.id);
-      const disp = dispMap.get(b.id);
+    // Group dispatch by batch_code and sku_id (flavor_id)
+    const dispMap = new Map<string, any>();
+    (dispRes.data ?? []).forEach((d: any) => {
+      const key = `${d.batch_code}_${d.sku_id}`;
+      if (!dispMap.has(key)) dispMap.set(key, { quantity_dispatched: 0, dispatch_date: d.dispatch_date, customer_name: d.customer_name });
+      const current = dispMap.get(key);
+      current.quantity_dispatched += (d.boxes_dispatched ?? 0);
+      current.dispatch_date = d.dispatch_date > current.dispatch_date ? d.dispatch_date : current.dispatch_date;
+      if (!current.customer_name) current.customer_name = d.customer_name;
+    });
+
+    const list: BatchHistory[] = (prodRes.data ?? []).map((b: any) => {
+      const key = `${b.batch_code}_${b.flavor_id}`;
+      const pack = packMap.get(key);
+      const disp = dispMap.get(key);
       return {
         id: b.id, batch_code: b.batch_code, status: b.status, created_at: b.created_at,
-        flavor_name: b.gg_flavors?.name ?? 'Unknown',
-        production: prod ? { manufacturing_date: prod.manufacturing_date, actual_output_kg: prod.actual_output_kg, batch_size: prod.batch_size ?? undefined } : undefined,
+        flavor_name: b.flavor?.name ?? 'Unknown',
+        production: { manufacturing_date: b.production_date, actual_output_kg: b.actual_yield ?? 0, batch_size: b.planned_yield ?? 0 },
         packing: pack ? { quantity_kg: pack.quantity_kg, boxes_count: pack.boxes_count, packing_date: pack.packing_date } : undefined,
-        dispatch: disp ? { quantity_dispatched: disp.quantity_dispatched, dispatch_date: disp.dispatch_date, customer_name: disp.gg_customers?.name ?? 'Unknown' } : undefined,
+        dispatch: disp ? { quantity_dispatched: disp.quantity_dispatched, dispatch_date: disp.dispatch_date, customer_name: disp.customer_name ?? 'Unknown' } : undefined,
       };
     });
     this.batches.set(list);

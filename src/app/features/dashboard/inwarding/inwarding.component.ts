@@ -40,7 +40,7 @@ import { InwardEvent } from '../../../shared/models/manufacturing.models';
                   <td class="px-4 py-3 text-gray-500">{{ event.unit }}</td>
                   <td class="px-4 py-3">{{ event.inward_date }}</td>
                   <td class="px-4 py-3 font-mono text-xs">{{ event.lot_ref ?? '—' }}</td>
-                  <td class="px-4 py-3">{{ event.supplier ?? '—' }}</td>
+                  <td class="px-4 py-3">{{ event.vendor?.name ?? '—' }}</td>
                   <td class="px-4 py-3" [class.text-red-600]="isExpiringSoon(event.expiry_date)">
                     {{ event.expiry_date ?? '—' }}
                   </td>
@@ -67,8 +67,8 @@ export class InwardingComponent implements OnInit {
   async load(): Promise<void> {
     this.loading.set(true);
     const { data, error } = await this.supabase.client
-      .from('inward_events')
-      .select('*, ingredient:recipe_ingredients(id,name,unit,active)')
+      .from('gg_inwarding')
+      .select('*, ingredient:gg_ingredients(id,name,default_unit,active), vendor:gg_vendors(name)')
       .order('inward_date', { ascending: false })
       .limit(100);
     if (!error && data) this.events.set(data as InwardEvent[]);
@@ -78,7 +78,7 @@ export class InwardingComponent implements OnInit {
   subscribeRealtime(): void {
     this.supabase.client
       .channel('inwarding-rt')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'inward_events' }, () => this.load())
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'gg_inwarding' }, () => this.load())
       .subscribe();
   }
 
