@@ -82,6 +82,7 @@ export interface SearchableSelectOption {
   `,
   styles: [`
     .searchable-select { position: relative; }
+    .searchable-select.open { z-index: 200; }
     .searchable-trigger {
       width: 100%;
       min-height: 40px;
@@ -109,7 +110,7 @@ export interface SearchableSelectOption {
       left: 0;
       right: 0;
       top: calc(100% + 6px);
-      z-index: 50;
+      z-index: 250;
       background: #fff;
       border: 1px solid #E5E7EB;
       border-radius: 12px;

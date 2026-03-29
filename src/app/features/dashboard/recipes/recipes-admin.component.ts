@@ -137,7 +137,7 @@ interface IngLine {
               }
 
               @if (ingLines().length > 0) {
-                <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;">
+                <div class="recipe-ingredients-shell" style="border:1px solid var(--border);border-radius:10px;overflow:visible;background:var(--card);">
                   <!-- Header -->
                   <div style="display:grid;grid-template-columns:1fr 110px 100px 36px;gap:8px;padding:8px 12px;background:#f8f9fa;border-bottom:1px solid var(--border);">
                     <span style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Ingredient</span>
@@ -145,33 +145,35 @@ interface IngLine {
                     <span style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Unit</span>
                     <span></span>
                   </div>
-                  <!-- Rows -->
-                  @for (line of ingLines(); track $index) {
-                    <div style="display:grid;grid-template-columns:1fr 110px 100px 36px;gap:8px;padding:8px 12px;border-bottom:1px solid #f3f4f6;align-items:center;">
-                      <app-searchable-select
-                        [options]="ingredientOptions()"
-                        [value]="line.ingredientId"
-                        placeholder="Select ingredient"
-                        searchPlaceholder="Search ingredients..."
-                        emptyText="No matching ingredients."
-                        createLabelPrefix="Add ingredient"
-                        [allowCreate]="true"
-                        (valueChange)="onIngredientSelected($index, $event)"
-                        (createRequested)="createIngredientFromPicker($index, $event)">
-                      </app-searchable-select>
-                      <input [(ngModel)]="line.quantity" [ngModelOptions]="{standalone:true}"
-                             type="number" min="0" step="0.001" class="gg-input"
-                             placeholder="0" style="font-size:13px;">
-                      <select [(ngModel)]="line.unit" [ngModelOptions]="{standalone:true}"
-                              class="gg-input dropdown-with-arrow" style="font-size:13px;">
-                        @for (u of UNITS; track u) { <option [value]="u">{{ u }}</option> }
-                      </select>
-                      <button type="button" (click)="removeIngLine($index)"
-                              style="width:32px;height:32px;background:#fff5f5;border:1px solid #fca5a5;border-radius:6px;color:#dc2626;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-                        <span class="material-icons-round" style="font-size:15px;">delete_outline</span>
-                      </button>
-                    </div>
-                  }
+                  <div class="recipe-ingredients-scroll">
+                    <!-- Rows -->
+                    @for (line of ingLines(); track $index) {
+                      <div class="recipe-ingredient-row" style="display:grid;grid-template-columns:1fr 110px 100px 36px;gap:8px;padding:8px 12px;border-bottom:1px solid #f3f4f6;align-items:center;">
+                        <app-searchable-select
+                          [options]="ingredientOptions()"
+                          [value]="line.ingredientId"
+                          placeholder="Select ingredient"
+                          searchPlaceholder="Search ingredients..."
+                          emptyText="No matching ingredients."
+                          createLabelPrefix="Add ingredient"
+                          [allowCreate]="true"
+                          (valueChange)="onIngredientSelected($index, $event)"
+                          (createRequested)="createIngredientFromPicker($index, $event)">
+                        </app-searchable-select>
+                        <input [(ngModel)]="line.quantity" [ngModelOptions]="{standalone:true}"
+                               type="number" min="0" step="0.001" class="gg-input"
+                               placeholder="0" style="font-size:13px;">
+                        <select [(ngModel)]="line.unit" [ngModelOptions]="{standalone:true}"
+                                class="gg-input dropdown-with-arrow" style="font-size:13px;">
+                          @for (u of UNITS; track u) { <option [value]="u">{{ u }}</option> }
+                        </select>
+                        <button type="button" (click)="removeIngLine($index)"
+                                style="width:32px;height:32px;background:#fff5f5;border:1px solid #fca5a5;border-radius:6px;color:#dc2626;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                          <span class="material-icons-round" style="font-size:15px;">delete_outline</span>
+                        </button>
+                      </div>
+                    }
+                  </div>
                   <!-- Totals row -->
                   @if (ingLines().length > 0) {
                     <div style="display:grid;grid-template-columns:1fr 110px 100px 36px;gap:8px;padding:8px 12px;background:#f8f9fa;align-items:center;">
@@ -363,6 +365,15 @@ interface IngLine {
         animation:slideUp 0.2s ease;
       }
       .rcp-toast-err { background:#dc2626; }
+      .recipe-ingredients-scroll {
+        max-height: 320px;
+        overflow-y: auto;
+        overflow-x: visible;
+      }
+      .recipe-ingredient-row {
+        position: relative;
+        overflow: visible;
+      }
       @keyframes slideUp { from { transform:translateY(16px); opacity:0; } to { transform:translateY(0); opacity:1; } }
       @keyframes slideDown { from { transform:translateY(-8px); opacity:0; } to { transform:translateY(0); opacity:1; } }
       @keyframes spin { to { transform:rotate(360deg); } }
