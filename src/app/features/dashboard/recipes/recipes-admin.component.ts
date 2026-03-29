@@ -559,22 +559,31 @@ export class RecipesAdminComponent implements OnInit {
       // 3. Upsert recipe
       const v = this.form.getRawValue();
       const payload = {
-        name: v.name,
+        title: v.name,
         flavor_id: flavorId,
         version: v.version,
         yield_factor: v.batch_size_kg,
-        ingredients,
         is_active: true,
       };
 
       const isEdit = this.editId();
+      let recipeId = isEdit;
       if (isEdit) {
         const { error } = await this.supabase.client.from('gg_recipes').update(payload).eq('id', isEdit);
         if (error) { this.formError.set(error.message); return; }
+        const syncError = await this.replaceRecipeLines(isEdit, ingredients);
+        if (syncError) { this.formError.set(syncError); return; }
         this.showToast('Recipe updated', 'success');
       } else {
-        const { error } = await this.supabase.client.from('gg_recipes').insert(payload);
-        if (error) { this.formError.set(error.message); return; }
+        const { data, error } = await this.supabase.client
+          .from('gg_recipes')
+          .insert(payload)
+          .select('id')
+          .single();
+        if (error || !data) { this.formError.set(error?.message ?? 'Failed to create recipe.'); return; }
+        recipeId = data.id;
+        const syncError = await this.replaceRecipeLines(recipeId, ingredients);
+        if (syncError) { this.formError.set(syncError); return; }
         this.showToast('Recipe created', 'success');
       }
 
@@ -589,6 +598,7 @@ export class RecipesAdminComponent implements OnInit {
 
   async deleteRecipe(id: string): Promise<void> {
     if (!confirm('Delete this recipe? This cannot be undone.')) return;
+    await this.supabase.client.from('recipe_lines').delete().eq('recipe_id', id);
     const { error } = await this.supabase.client.from('gg_recipes').delete().eq('id', id);
     if (error) { this.showToast(error.message, 'error'); return; }
     this.showToast('Recipe deleted', 'success');
@@ -618,14 +628,31 @@ export class RecipesAdminComponent implements OnInit {
 
   private async loadRecipes(): Promise<void> {
     this.loading.set(true);
-    const { data } = await this.supabase.client
+    const [{ data: recipesData }, { data: recipeLines }] = await Promise.all([
+      this.supabase.client
       .from('gg_recipes')
-      .select('id, name, flavor_id, version, batch_size_kg:yield_factor, is_active, ingredients, gg_flavors(name)')
-      .order('created_at', { ascending: false });
+      .select('id, name:title, flavor_id, version, batch_size_kg:yield_factor, is_active, gg_flavors(name)')
+      .order('created_at', { ascending: false }),
+      this.supabase.client
+        .from('recipe_lines')
+        .select('recipe_id, ingredient_id, qty'),
+    ]);
 
     const ingMap = new Map(this.ingredients().map(i => [i.id, i]));
+    const linesByRecipeId = new Map<string, Array<{ ingredient_id: string; quantity: number; unit: string }>>();
 
-    this.recipes.set((data ?? []).map((r: any) => ({
+    (recipeLines ?? []).forEach((line: any) => {
+      const existing = linesByRecipeId.get(line.recipe_id) ?? [];
+      const ingredient = ingMap.get(line.ingredient_id);
+      existing.push({
+        ingredient_id: line.ingredient_id,
+        quantity: Number(line.qty) || 0,
+        unit: ingredient?.default_unit ?? 'kg',
+      });
+      linesByRecipeId.set(line.recipe_id, existing);
+    });
+
+    this.recipes.set((recipesData ?? []).map((r: any) => ({
       id: r.id,
       name: r.name,
       flavor_id: r.flavor_id,
@@ -633,7 +660,7 @@ export class RecipesAdminComponent implements OnInit {
       version: r.version,
       batch_size_kg: r.batch_size_kg,
       is_active: r.is_active,
-      ingredients: (r.ingredients ?? []).map((i: any) => ({
+      ingredients: (linesByRecipeId.get(r.id) ?? []).map((i: any) => ({
         ingredient_id: i.ingredient_id,
         quantity: i.quantity,
         unit: i.unit,
@@ -712,6 +739,36 @@ export class RecipesAdminComponent implements OnInit {
 
     this.ingredients.update(list => [...list, data].sort((a, b) => a.name.localeCompare(b.name)));
     this.onIngredientSelected(index, data.id);
+  }
+
+  private async replaceRecipeLines(
+    recipeId: string,
+    ingredients: Array<{ ingredient_id: string; quantity: number; unit: string }>,
+  ): Promise<string | null> {
+    const { error: deleteError } = await this.supabase.client
+      .from('recipe_lines')
+      .delete()
+      .eq('recipe_id', recipeId);
+
+    if (deleteError) {
+      return deleteError.message;
+    }
+
+    if (ingredients.length === 0) {
+      return null;
+    }
+
+    const { error: insertError } = await this.supabase.client
+      .from('recipe_lines')
+      .insert(
+        ingredients.map((line) => ({
+          recipe_id: recipeId,
+          ingredient_id: line.ingredient_id,
+          qty: line.quantity,
+        })),
+      );
+
+    return insertError?.message ?? null;
   }
 
   private nextDefaultVersion(): number {
