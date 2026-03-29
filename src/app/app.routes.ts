@@ -18,6 +18,7 @@ export const routes: Routes = [
       { path: '', redirectTo: 'home', pathMatch: 'full' },
       { path: 'home', loadComponent: () => import('./features/dashboard/home/dashboard-home.component').then(m => m.DashboardHomeComponent) },
       { path: 'kanban', loadComponent: () => import('./features/dashboard/kanban/kanban.component').then(m => m.KanbanComponent) },
+      { path: 'inwarding', loadComponent: () => import('./features/dashboard/inwarding/inwarding.component').then(m => m.InwardingComponent) },
       { path: 'recipes', loadComponent: () => import('./features/dashboard/recipes/recipes-admin.component').then(m => m.RecipesAdminComponent) },
       { path: 'inventory', loadComponent: () => import('./features/dashboard/inventory/inventory.component').then(m => m.InventoryComponent) },
       { path: 'ingredients', loadComponent: () => import('./features/dashboard/ingredients/ingredients.component').then(m => m.IngredientsComponent) },

@@ -116,6 +116,7 @@ export class DashboardShellComponent {
   navItems: NavItem[] = [
     { label: 'Dashboard',   icon: 'dashboard',              route: 'home' },
     { label: 'Live Kanban', icon: 'view_kanban',             route: 'kanban' },
+    { label: 'Inwarding',   icon: 'input',                  route: 'inwarding' },
     { label: 'Production',  icon: 'precision_manufacturing', route: 'production' },
     { label: 'Packing',     icon: 'inventory_2',             route: 'packing' },
     { label: 'Dispatch',    icon: 'local_shipping',          route: 'dispatch' },
