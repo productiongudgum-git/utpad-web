@@ -562,7 +562,7 @@ export class RecipesAdminComponent implements OnInit {
         name: v.name,
         flavor_id: flavorId,
         version: v.version,
-        batch_size_kg: v.batch_size_kg,
+        yield_factor: v.batch_size_kg,
         ingredients,
         is_active: true,
       };
@@ -620,7 +620,7 @@ export class RecipesAdminComponent implements OnInit {
     this.loading.set(true);
     const { data } = await this.supabase.client
       .from('gg_recipes')
-      .select('id, name, flavor_id, version, batch_size_kg, is_active, ingredients, gg_flavors(name)')
+      .select('id, name, flavor_id, version, batch_size_kg:yield_factor, is_active, ingredients, gg_flavors(name)')
       .order('created_at', { ascending: false });
 
     const ingMap = new Map(this.ingredients().map(i => [i.id, i]));
