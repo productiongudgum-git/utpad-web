@@ -254,7 +254,7 @@ async function fetchWorkersFromSupabase() {
     'ops_workers?select=worker_id,name,phone,pin,worker_role,active,created_at&order=created_at.desc&limit=500',
   );
   const accessRows = await supabaseRequest(
-    'ops_worker_module_access?select=worker_id,module&limit=2000',
+    'ops_worker_module_access?select=worker_id,module:module_name&limit=2000',
   );
 
   const modulesByWorkerId = new Map();
@@ -283,7 +283,7 @@ async function fetchWorkerByIdFromSupabase(workerId) {
   }
 
   const accessRows = await supabaseRequest(
-    `ops_worker_module_access?select=worker_id,module&worker_id=eq.${encodeURIComponent(workerId)}&limit=20`,
+    `ops_worker_module_access?select=worker_id,module:module_name&worker_id=eq.${encodeURIComponent(workerId)}&limit=20`,
   );
 
   const modulesByWorkerId = new Map();
@@ -312,10 +312,10 @@ async function replaceWorkerModulesInSupabase(workerId, allowedModules) {
     return;
   }
 
-  await supabaseRequest('ops_worker_module_access?on_conflict=worker_id%2Cmodule', {
+  await supabaseRequest('ops_worker_module_access?on_conflict=worker_id%2Cmodule_name', {
     method: 'POST',
     headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
-    body: allowedModules.map((module) => ({ worker_id: workerId, module })),
+    body: allowedModules.map((module) => ({ worker_id: workerId, module_name: module })),
   });
 }
 
@@ -353,10 +353,10 @@ async function upsertWorkerFromEventToSupabase(event) {
     },
   });
 
-  await supabaseRequest('ops_worker_module_access?on_conflict=worker_id%2Cmodule', {
+  await supabaseRequest('ops_worker_module_access?on_conflict=worker_id%2Cmodule_name', {
     method: 'POST',
     headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
-    body: { worker_id: event.workerId, module: event.module },
+    body: { worker_id: event.workerId, module_name: event.module },
   });
 }
 
@@ -1052,7 +1052,7 @@ app.post('/api/v1/auth/login/phone', async (req, res) => {
 
       // Fetch module permissions
       const accessRows = await supabaseRequest(
-        `ops_worker_module_access?worker_id=eq.${encodeURIComponent(worker.id)}&select=module`
+        `ops_worker_module_access?worker_id=eq.${encodeURIComponent(worker.id)}&select=module:module_name`
       );
       modules = (accessRows || []).map(r => r.module);
     } else {

@@ -628,7 +628,7 @@ export class TeamComponent implements OnInit {
 
     const moduleRows = input.modules.map((module) => ({
       worker_id: input.userId,
-      module,
+      module_name: module,
     }));
 
     if (moduleRows.length > 0) {

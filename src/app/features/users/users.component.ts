@@ -402,7 +402,7 @@ export class UsersComponent implements OnInit {
     this.loadingWorkers.set(true);
     const { data, error } = await this.supabase.client
       .from('ops_workers')
-      .select('worker_id, name, phone, worker_role, active, created_at, ops_worker_module_access(module)')
+      .select('worker_id, name, phone, worker_role, active, created_at, ops_worker_module_access(module_name)')
       .eq('active', true)
       .order('created_at', { ascending: false });
 
@@ -414,7 +414,7 @@ export class UsersComponent implements OnInit {
         worker_role: w.worker_role,
         active: w.active,
         created_at: w.created_at,
-        modules: (w.ops_worker_module_access ?? []).map((m: any) => m.module as WorkerModule),
+        modules: (w.ops_worker_module_access ?? []).map((m: any) => (m.module_name ?? m.module) as WorkerModule),
       }));
       this.workers.set(rows);
     }
@@ -479,7 +479,7 @@ export class UsersComponent implements OnInit {
 
     const { error: moduleError } = await this.supabase.client
       .from('ops_worker_module_access')
-      .insert(modules.map(module => ({ worker_id: workerId, module })));
+      .insert(modules.map(module => ({ worker_id: workerId, module_name: module })));
 
     if (moduleError) {
       this.setStatus(`Worker created but module assignment failed: ${moduleError.message}`, 'error');
@@ -555,7 +555,7 @@ export class UsersComponent implements OnInit {
 
     const { error: moduleError } = await this.supabase.client
       .from('ops_worker_module_access')
-      .insert(this.editModules().map(m => ({ worker_id: worker.worker_id, module: m })));
+      .insert(this.editModules().map(m => ({ worker_id: worker.worker_id, module_name: m })));
 
     if (moduleError) {
       this.setEditStatus(`Details saved but module update failed: ${moduleError.message}`, 'error');
