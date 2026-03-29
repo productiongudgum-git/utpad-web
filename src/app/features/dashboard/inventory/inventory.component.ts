@@ -173,15 +173,32 @@ export class InventoryComponent implements OnInit {
 
   async loadData(): Promise<void> {
     this.loading.set(true);
-    const { data } = await this.supabase.client.from('gg_ingredients')
-      .select('id, name, current_stock, reorder_point, default_unit')
-      .order('name');
-    const mapped = (data ?? []).map((i: any) => ({
-      id: i.id, name: i.name,
-      current_stock: i.current_stock ?? 0, reorder_point: i.reorder_point ?? 0,
-      default_unit: i.default_unit ?? 'kg',
-      isLow: (i.current_stock ?? 0) <= (i.reorder_point ?? 0),
-    }));
+    const [ingredientsRes, inventoryRes] = await Promise.all([
+      this.supabase.client.from('gg_ingredients')
+        .select('id, name, default_unit')
+        .order('name'),
+      this.supabase.client.from('inventory_raw_materials')
+        .select('ingredient_id, current_qty, unit, low_stock_threshold'),
+    ]);
+
+    const inventoryByIngredientId = new Map<string, any>();
+    (inventoryRes.data ?? []).forEach((row: any) => {
+      inventoryByIngredientId.set(row.ingredient_id, row);
+    });
+
+    const mapped = (ingredientsRes.data ?? []).map((i: any) => {
+      const stock = inventoryByIngredientId.get(i.id);
+      const currentStock = stock?.current_qty ?? 0;
+      const reorderPoint = stock?.low_stock_threshold ?? 0;
+      return {
+        id: i.id,
+        name: i.name,
+        current_stock: currentStock,
+        reorder_point: reorderPoint,
+        default_unit: stock?.unit ?? i.default_unit ?? 'kg',
+        isLow: reorderPoint > 0 && currentStock <= reorderPoint,
+      };
+    });
     this.items.set(mapped);
     this.filteredItems.set(mapped);
     this.loading.set(false);
@@ -194,8 +211,14 @@ export class InventoryComponent implements OnInit {
   }
 
   async saveStock(item: IngredientStock): Promise<void> {
-    const { error } = await this.supabase.client.from('gg_ingredients')
-      .update({ current_stock: this.editStock, reorder_point: this.editReorder }).eq('id', item.id);
+    const payload = {
+      ingredient_id: item.id,
+      current_qty: Math.max(0, Number(this.editStock) || 0),
+      unit: item.default_unit,
+      low_stock_threshold: Math.max(0, Number(this.editReorder) || 0),
+    };
+    const { error } = await this.supabase.client.from('inventory_raw_materials')
+      .upsert(payload, { onConflict: 'ingredient_id' });
     if (!error) { this.showToast('Stock updated', 'success'); this.editingId.set(null); await this.loadData(); }
     else this.showToast(error.message, 'error');
   }

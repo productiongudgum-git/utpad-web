@@ -215,6 +215,7 @@ interface BatchFlavorOption {
 })
 export class DispatchComponent implements OnInit {
   private supabase = inject(SupabaseService);
+  private readonly uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
   events = signal<DispatchEvent[]>([]);
   batchFlavors = signal<BatchFlavorOption[]>([]);
@@ -299,12 +300,12 @@ export class DispatchComponent implements OnInit {
 
     const payload: any = {
       batch_code: this.selectedBatchCode,
-      sku_id: this.selectedFlavorId || this.selectedBatchCode,
+      sku_id: this.selectedFlavorId || null,
       invoice_number: this.newInvoiceNumber.trim(),
       customer_name: this.newCustomerName.trim() || null,
       boxes_dispatched: this.newBoxesDispatched,
       dispatch_date: new Date().toISOString().split('T')[0],
-      worker_id: this.newWorkerId.trim() || 'web-admin',
+      worker_id: this.toUuidOrNull(this.newWorkerId),
     };
 
     const { error } = await this.supabase.client
@@ -357,5 +358,10 @@ export class DispatchComponent implements OnInit {
     this.toast.set(msg);
     this.toastKind.set(kind);
     setTimeout(() => this.toast.set(''), 3000);
+  }
+
+  private toUuidOrNull(value: string): string | null {
+    const trimmed = value.trim();
+    return this.uuidPattern.test(trimmed) ? trimmed : null;
   }
 }

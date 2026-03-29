@@ -203,6 +203,7 @@ interface BatchFlavorOption {
 })
 export class PackingComponent implements OnInit {
   private supabase = inject(SupabaseService);
+  private readonly uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
   sessions = signal<PackingSession[]>([]);
   batchFlavors = signal<BatchFlavorOption[]>([]);
@@ -285,7 +286,7 @@ export class PackingComponent implements OnInit {
       batch_code: this.selectedBatchCode,
       flavor_id: this.selectedFlavorId || null,
       session_date: new Date().toISOString().split('T')[0],
-      worker_id: this.newWorkerId.trim() || 'web-admin',
+      worker_id: this.toUuidOrNull(this.newWorkerId),
       boxes_packed: this.newBoxesPacked,
     };
 
@@ -341,5 +342,10 @@ export class PackingComponent implements OnInit {
     this.toast.set(msg);
     this.toastKind.set(kind);
     setTimeout(() => this.toast.set(''), 3000);
+  }
+
+  private toUuidOrNull(value: string): string | null {
+    const trimmed = value.trim();
+    return this.uuidPattern.test(trimmed) ? trimmed : null;
   }
 }

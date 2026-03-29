@@ -207,6 +207,7 @@ import { ProductionBatch, FlavorDefinition } from '../../../shared/models/manufa
 })
 export class ProductionComponent implements OnInit {
   private supabase = inject(SupabaseService);
+  private readonly uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
   batches = signal<ProductionBatch[]>([]);
   flavors = signal<FlavorDefinition[]>([]);
@@ -285,9 +286,9 @@ export class ProductionComponent implements OnInit {
       batch_code: this.newBatchCode.trim(),
       flavor_id: this.newFlavorId,
       sku_id: this.newFlavorId,  // sku_id = flavor_id for now
-      recipe_id: this.newRecipeId || this.newFlavorId,
+      recipe_id: this.newRecipeId || null,
       production_date: new Date().toISOString().split('T')[0],
-      worker_id: this.newWorkerId.trim() || 'web-admin',
+      worker_id: this.toUuidOrNull(this.newWorkerId),
       status: 'open',
       planned_yield: this.newPlannedYield,
       actual_yield: this.newActualYield,
@@ -343,5 +344,10 @@ export class ProductionComponent implements OnInit {
     this.toast.set(msg);
     this.toastKind.set(kind);
     setTimeout(() => this.toast.set(''), 3000);
+  }
+
+  private toUuidOrNull(value: string): string | null {
+    const trimmed = value.trim();
+    return this.uuidPattern.test(trimmed) ? trimmed : null;
   }
 }

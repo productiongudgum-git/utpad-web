@@ -45,19 +45,32 @@ export class IngredientStockService {
   async refresh(): Promise<void> {
     this.loading.set(true);
     try {
-      const { data } = await this.supabase.client
-        .from('gg_ingredients')
-        .select('id, name, default_unit, current_stock, reorder_point')
-        .order('name');
+      const [ingredientsRes, inventoryRes] = await Promise.all([
+        this.supabase.client
+          .from('gg_ingredients')
+          .select('id, name, default_unit')
+          .order('name'),
+        this.supabase.client
+          .from('inventory_raw_materials')
+          .select('ingredient_id, current_qty, unit, low_stock_threshold'),
+      ]);
+
+      const inventoryByIngredientId = new Map<string, any>();
+      (inventoryRes.data ?? []).forEach((item: any) => {
+        inventoryByIngredientId.set(item.ingredient_id, item);
+      });
 
       this._ingredients.set(
-        (data ?? []).map((i: any) => ({
-          id: i.id,
-          name: i.name,
-          default_unit: i.default_unit ?? 'kg',
-          current_stock: i.current_stock ?? 0,
-          reorder_point: i.reorder_point ?? 0,
-        }))
+        (ingredientsRes.data ?? []).map((i: any) => {
+          const inventory = inventoryByIngredientId.get(i.id);
+          return {
+            id: i.id,
+            name: i.name,
+            default_unit: inventory?.unit ?? i.default_unit ?? 'kg',
+            current_stock: inventory?.current_qty ?? 0,
+            reorder_point: inventory?.low_stock_threshold ?? 0,
+          };
+        })
       );
     } finally {
       this.loading.set(false);

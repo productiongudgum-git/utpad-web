@@ -93,13 +93,6 @@ interface TeamMember {
                         <span style="font-size:12px;color:var(--muted-fg);display:block;margin-top:4px;">{{ m.mobile_number }}</span>
                       }
                     </div>
-                    <button
-                      (click)="openEditDialog(m)"
-                      class="team-edit-btn"
-                      style="padding:6px 14px;background:var(--secondary);border:1px solid var(--border);color:var(--muted-fg);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;opacity:0;transition:opacity 0.15s;">
-                      <span class="material-icons-round" style="font-size:14px;">edit</span>
-                      Edit
-                    </button>
                   </div>
                 </div>
               }
@@ -186,46 +179,7 @@ interface TeamMember {
               </div>
 
               <div style="margin-bottom:16px;">
-                <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Username *</label>
-                <input
-                  formControlName="username"
-                  class="beautiful-input"
-                  placeholder="e.g. rajan.k"
-                  [style.opacity]="editId() ? '0.6' : '1'"
-                  [attr.disabled]="editId() ? true : null"
-                  style="width:100%;box-sizing:border-box;">
-                @if (editId()) {
-                  <p style="font-size:11px;color:var(--muted-fg);margin:4px 0 0;">Username cannot be changed.</p>
-                }
-              </div>
-
-              <div style="margin-bottom:16px;">
-                <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">
-                  Password {{ editId() ? '' : '*' }}
-                </label>
-                <input
-                  formControlName="password_hash"
-                  type="password"
-                  class="beautiful-input"
-                  style="width:100%;box-sizing:border-box;"
-                  [placeholder]="editId() ? 'Leave blank to keep current password' : 'Set a password'">
-                @if (editId()) {
-                  <p style="font-size:11px;color:var(--muted-fg);margin:4px 0 0;">Leave blank to keep existing password.</p>
-                }
-              </div>
-
-              <div style="margin-bottom:16px;">
-                <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Role *</label>
-                <select formControlName="role" class="beautiful-input" style="width:100%;box-sizing:border-box;cursor:pointer;">
-                  <option value="admin">Admin</option>
-                  <option value="worker">Worker</option>
-                </select>
-              </div>
-
-              <div style="margin-bottom:16px;">
-                <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">
-                  Mobile Number {{ form.get('role')?.value === 'worker' ? '*' : '(optional)' }}
-                </label>
+                <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Mobile Number *</label>
                 <input
                   formControlName="mobile_number"
                   class="beautiful-input"
@@ -233,38 +187,34 @@ interface TeamMember {
                   inputmode="numeric"
                   maxlength="10"
                   style="width:100%;box-sizing:border-box;">
-                @if (form.get('role')?.value === 'worker') {
-                  <p style="font-size:11px;color:var(--muted-fg);margin:4px 0 0;">Android workers log in with this phone number.</p>
-                }
+                <p style="font-size:11px;color:var(--muted-fg);margin:4px 0 0;">Workers log in on Android with this phone number.</p>
               </div>
 
-              @if (form.get('role')?.value === 'worker') {
-                <div style="margin-bottom:16px;">
-                  <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:10px;">Module Access</label>
-                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;" class="module-grid">
-                    @for (mod of allModules; track mod) {
-                      <button
-                        type="button"
-                        (click)="toggleModule(mod)"
-                        [style.background]="selectedModules().includes(mod) ? getModuleColor(mod).bg : '#fff'"
-                        [style.borderColor]="selectedModules().includes(mod) ? getModuleColor(mod).fg : 'var(--border)'"
-                        style="display:flex;align-items:center;gap:10px;padding:12px;border:1.5px solid;border-radius:10px;cursor:pointer;transition:all 0.15s;">
-                        <span
-                          class="material-icons-round"
-                          [style.color]="selectedModules().includes(mod) ? getModuleColor(mod).fg : 'var(--muted-fg)'"
-                          style="font-size:20px;">
-                          {{ selectedModules().includes(mod) ? 'check_box' : 'check_box_outline_blank' }}
-                        </span>
-                        <span
-                          [style.color]="selectedModules().includes(mod) ? getModuleColor(mod).fg : 'var(--muted-fg)'"
-                          style="font-size:13px;font-weight:600;">
-                          {{ mod | titlecase }}
-                        </span>
-                      </button>
-                    }
-                  </div>
+              <div style="margin-bottom:16px;">
+                <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:10px;">Module Access *</label>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;" class="module-grid">
+                  @for (mod of allModules; track mod) {
+                    <button
+                      type="button"
+                      (click)="toggleModule(mod)"
+                      [style.background]="selectedModules().includes(mod) ? getModuleColor(mod).bg : '#fff'"
+                      [style.borderColor]="selectedModules().includes(mod) ? getModuleColor(mod).fg : 'var(--border)'"
+                      style="display:flex;align-items:center;gap:10px;padding:12px;border:1.5px solid;border-radius:10px;cursor:pointer;transition:all 0.15s;">
+                      <span
+                        class="material-icons-round"
+                        [style.color]="selectedModules().includes(mod) ? getModuleColor(mod).fg : 'var(--muted-fg)'"
+                        style="font-size:20px;">
+                        {{ selectedModules().includes(mod) ? 'check_box' : 'check_box_outline_blank' }}
+                      </span>
+                      <span
+                        [style.color]="selectedModules().includes(mod) ? getModuleColor(mod).fg : 'var(--muted-fg)'"
+                        style="font-size:13px;font-weight:600;">
+                        {{ mod | titlecase }}
+                      </span>
+                    </button>
+                  }
                 </div>
-              }
+              </div>
 
               @if (editId()) {
                 <div style="margin-bottom:20px;display:flex;align-items:center;gap:12px;">
@@ -289,7 +239,19 @@ interface TeamMember {
                 </p>
               }
 
-              <div style="display:flex;gap:10px;justify-content:flex-end;padding-top:8px;border-top:1px solid var(--border);">
+              <div style="display:flex;gap:10px;justify-content:space-between;align-items:center;padding-top:8px;border-top:1px solid var(--border);flex-wrap:wrap;">
+                @if (editId()) {
+                  <button
+                    type="button"
+                    (click)="deleteUser()"
+                    style="padding:9px 18px;background:#fff5f5;border:1px solid #fca5a5;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;color:#dc2626;">
+                    Delete User
+                  </button>
+                }
+                @if (!editId()) {
+                  <span></span>
+                }
+                <div style="display:flex;gap:10px;">
                 <button
                   type="button"
                   (click)="closeDialog()"
@@ -303,6 +265,7 @@ interface TeamMember {
                     {{ editId() ? 'Update User' : 'Create User' }}
                   }
                 </button>
+                </div>
               </div>
             </form>
           </div>
@@ -339,16 +302,8 @@ export class TeamComponent implements OnInit {
 
   readonly form = this.fb.nonNullable.group({
     name: ['', Validators.required],
-    role: ['worker', Validators.required],
-    username: ['', Validators.required],
-    password_hash: ['', Validators.required],
-    mobile_number: [''],
+    mobile_number: ['', [Validators.required, Validators.pattern(PHONE_PATTERN)]],
   });
-
-  constructor() {
-    this.applyRoleValidation(this.form.controls.role.getRawValue());
-    this.form.controls.role.valueChanges.subscribe((role) => this.applyRoleValidation(role ?? 'worker'));
-  }
 
   async ngOnInit(): Promise<void> {
     await this.loadData();
@@ -357,55 +312,40 @@ export class TeamComponent implements OnInit {
   openCreateDialog(): void {
     this.editId.set(null);
     this.form.reset({
-      role: 'worker',
       name: '',
-      username: '',
-      password_hash: '',
       mobile_number: '',
     });
-    this.form.controls.password_hash.setValidators(Validators.required);
-    this.form.controls.password_hash.updateValueAndValidity({ emitEvent: false });
-    this.form.controls.username.enable();
     this.selectedModules.set([]);
     this.activeToggle.set(true);
     this.formError.set('');
     this.dialogOpen.set(true);
-    this.applyRoleValidation('worker');
   }
 
   openEditDialog(member: TeamMember): void {
+    if (member.role !== 'worker') {
+      this.showToast('Admin accounts are read-only here. Worker access is managed in this screen.', 'error');
+      return;
+    }
     this.editId.set(member.id);
     this.form.patchValue({
       name: member.name,
-      role: member.role,
-      username: member.username,
-      password_hash: '',
       mobile_number: member.mobile_number,
     });
-    this.form.controls.password_hash.clearValidators();
-    this.form.controls.password_hash.updateValueAndValidity({ emitEvent: false });
-    this.form.controls.username.disable();
     this.selectedModules.set(member.modules as WorkerModule[]);
     this.activeToggle.set(member.active);
     this.formError.set('');
     this.dialogOpen.set(true);
-    this.applyRoleValidation(member.role);
   }
 
   closeDialog(): void {
     this.dialogOpen.set(false);
     this.editId.set(null);
     this.form.reset({
-      role: 'worker',
       name: '',
-      username: '',
-      password_hash: '',
       mobile_number: '',
     });
-    this.form.controls.username.enable();
     this.selectedModules.set([]);
     this.formError.set('');
-    this.applyRoleValidation('worker');
   }
 
   toggleModule(mod: WorkerModule): void {
@@ -426,17 +366,15 @@ export class TeamComponent implements OnInit {
 
     const formValue = this.form.getRawValue();
     const normalizedPhone = this.normalizePhone(formValue.mobile_number);
-    const modules = formValue.role === 'worker' ? [...this.selectedModules()] : [];
+    const modules = [...this.selectedModules()];
 
-    if (formValue.role === 'worker') {
-      if (!PHONE_PATTERN.test(normalizedPhone)) {
-        this.formError.set('Workers must have a valid 10-digit Indian mobile number.');
-        return;
-      }
-      if (modules.length === 0) {
-        this.formError.set('Assign at least one module so the worker can access the Android app.');
-        return;
-      }
+    if (!PHONE_PATTERN.test(normalizedPhone)) {
+      this.formError.set('Workers must have a valid 10-digit Indian mobile number.');
+      return;
+    }
+    if (modules.length === 0) {
+      this.formError.set('Assign at least one module so the worker can access the Android app.');
+      return;
     }
 
     this.saving.set(true);
@@ -451,16 +389,12 @@ export class TeamComponent implements OnInit {
 
     const payload: Record<string, unknown> = {
       name: formValue.name.trim(),
-      role: formValue.role === 'worker' ? 'worker' : 'Platform_Admin',
-      username: formValue.username.trim(),
+      role: 'worker',
+      username: this.buildWorkerUsername(normalizedPhone),
       modules,
       active: this.editId() ? this.activeToggle() : true,
       mobile_number: normalizedPhone || null,
     };
-
-    if (formValue.password_hash.trim()) {
-      payload['password_hash'] = formValue.password_hash.trim();
-    }
 
     try {
       let userId = this.editId();
@@ -475,7 +409,6 @@ export class TeamComponent implements OnInit {
           throw new Error(error.message);
         }
       } else {
-        payload['password_hash'] = formValue.password_hash.trim();
         const { data, error } = await this.supabase.client
           .from('gg_users')
           .insert(payload)
@@ -493,17 +426,13 @@ export class TeamComponent implements OnInit {
         throw new Error('User save succeeded but no user id was returned.');
       }
 
-      if (formValue.role === 'worker') {
-        await this.syncWorkerAccessRecord({
-          userId,
-          name: formValue.name.trim(),
-          phone: normalizedPhone,
-          modules,
-          active: (payload['active'] as boolean) ?? true,
-        });
-      } else {
-        await this.removeWorkerAccessRecord(userId);
-      }
+      await this.syncWorkerAccessRecord({
+        userId,
+        name: formValue.name.trim(),
+        phone: normalizedPhone,
+        modules,
+        active: (payload['active'] as boolean) ?? true,
+      });
 
       this.showToast(this.editId() ? 'User updated successfully' : 'User created successfully', 'success');
       this.closeDialog();
@@ -543,21 +472,12 @@ export class TeamComponent implements OnInit {
     this.loading.set(false);
   }
 
-  private applyRoleValidation(role: string): void {
-    if (role === 'worker') {
-      this.form.controls.mobile_number.setValidators([
-        Validators.required,
-        Validators.pattern(PHONE_PATTERN),
-      ]);
-    } else {
-      this.form.controls.mobile_number.clearValidators();
-      this.selectedModules.set([]);
-    }
-    this.form.controls.mobile_number.updateValueAndValidity({ emitEvent: false });
-  }
-
   private toDashboardRole(role: string | null | undefined): 'admin' | 'worker' {
     return role?.trim().toLowerCase() === 'worker' ? 'worker' : 'admin';
+  }
+
+  private buildWorkerUsername(phone: string): string {
+    return `worker_${phone}`;
   }
 
   private normalizePhone(value: string): string {
@@ -659,6 +579,39 @@ export class TeamComponent implements OnInit {
 
     if (workerError) {
       throw new Error(`Failed to remove worker session record: ${workerError.message}`);
+    }
+  }
+
+  async deleteUser(): Promise<void> {
+    const userId = this.editId();
+    if (!userId) {
+      return;
+    }
+    if (!confirm('Delete this worker? This removes Android login access and dashboard access immediately.')) {
+      return;
+    }
+
+    this.saving.set(true);
+    this.formError.set('');
+
+    try {
+      await this.removeWorkerAccessRecord(userId);
+      const { error } = await this.supabase.client
+        .from('gg_users')
+        .delete()
+        .eq('id', userId);
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      this.showToast('User deleted successfully', 'success');
+      this.closeDialog();
+      await this.loadData();
+    } catch (error) {
+      this.formError.set(error instanceof Error ? error.message : 'Unable to delete user.');
+    } finally {
+      this.saving.set(false);
     }
   }
 

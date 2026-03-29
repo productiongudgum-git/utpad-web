@@ -239,7 +239,7 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
         // Total dispatched boxes (we'll estimate kg)
         this.supabase.client.from('dispatch_events').select('boxes_dispatched'),
         // Low stock ingredients
-        this.supabase.client.from('gg_ingredients').select('id, current_stock, reorder_point'),
+        this.supabase.client.from('inventory_raw_materials').select('ingredient_id, current_qty, low_stock_threshold'),
         // Recent production activity
         this.supabase.client.from('production_batches')
           .select('id, actual_yield, production_date, created_at, batch_code')
@@ -263,7 +263,10 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
       const totalProd = (prodRes.data ?? []).reduce((s: number, r: any) => s + (r.actual_yield ?? 0), 0);
       const totalDispBoxes = (dispRes.data ?? []).reduce((s: number, r: any) => s + (r.boxes_dispatched ?? 0), 0);
       const totalDispKg = totalDispBoxes * 1.5; // Dummy conversion: 1 box = 1.5kg
-      const lowStock = (stockRes.data ?? []).filter((i: any) => (i.current_stock ?? 0) <= (i.reorder_point ?? 0)).length;
+      const lowStock = (stockRes.data ?? []).filter((i: any) => {
+        const threshold = i.low_stock_threshold ?? 0;
+        return threshold > 0 && (i.current_qty ?? 0) <= threshold;
+      }).length;
 
       this.kpi.set({
         activeBatches: batchRes.count ?? 0,

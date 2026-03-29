@@ -8,7 +8,6 @@ import { IngredientStockService } from '../../../core/services/ingredient-stock.
 interface Ingredient {
   id: string;
   name: string;
-  barcode: string;
   default_unit: string;
   reorder_point: number;
   current_stock: number;
@@ -80,10 +79,6 @@ interface Ingredient {
                 <label class="ing-label">Name *</label>
                 <input formControlName="name" class="gg-input" placeholder="e.g. Gum Base"
                        [style.border-color]="form.get('name')!.invalid && form.get('name')!.touched ? '#dc2626' : ''">
-              </div>
-              <div>
-                <label class="ing-label">Barcode</label>
-                <input formControlName="barcode" class="gg-input" placeholder="e.g. 8901234567890">
               </div>
               <div>
                 <label class="ing-label">Default Unit *</label>
@@ -186,7 +181,6 @@ interface Ingredient {
             <thead>
               <tr style="background:#f8f9fa;border-bottom:1px solid var(--border);">
                 <th style="text-align:left;padding:11px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Ingredient</th>
-                <th style="text-align:left;padding:11px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Barcode</th>
                 <th style="text-align:left;padding:11px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;min-width:160px;">Current Stock</th>
                 <th style="text-align:left;padding:11px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Reorder Point</th>
                 <th style="text-align:left;padding:11px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Vendors</th>
@@ -213,9 +207,6 @@ interface Ingredient {
                       </div>
                     </div>
                   </td>
-
-                  <!-- Barcode -->
-                  <td style="padding:12px 12px;font-size:13px;color:#6B7280;font-family:monospace;">{{ ing.barcode || '—' }}</td>
 
                   <!-- Current stock + bar -->
                   <td style="padding:12px 12px;">
@@ -335,7 +326,7 @@ export class IngredientsComponent implements OnInit {
   readonly filteredIngredients = computed(() => {
     let list = this.ingredients();
     const q = this.searchSig().toLowerCase().trim();
-    if (q) list = list.filter(i => i.name.toLowerCase().includes(q) || i.barcode.toLowerCase().includes(q));
+    if (q) list = list.filter(i => i.name.toLowerCase().includes(q));
     if (this.showLowStockOnly()) list = list.filter(i => this.isLow(i));
     return list;
   });
@@ -350,7 +341,6 @@ export class IngredientsComponent implements OnInit {
 
   form = this.fb.nonNullable.group({
     name:          ['', Validators.required],
-    barcode:       [''],
     default_unit:  ['kg', Validators.required],
     reorder_point: [0],
     current_stock: [0],
@@ -401,9 +391,13 @@ export class IngredientsComponent implements OnInit {
   async saveThreshold(ing: Ingredient): Promise<void> {
     const val = Math.max(0, Number(this.pendingThreshold) || 0);
     const { error } = await this.supabase.client
-      .from('gg_ingredients')
-      .update({ reorder_point: val })
-      .eq('id', ing.id);
+      .from('inventory_raw_materials')
+      .upsert({
+        ingredient_id: ing.id,
+        current_qty: ing.current_stock,
+        unit: ing.default_unit,
+        low_stock_threshold: val,
+      }, { onConflict: 'ingredient_id' });
     if (error) { this.showToast(error.message, 'error'); return; }
     this.editingThresholdId.set(null);
     this.showToast(`Reorder point updated to ${val} ${ing.default_unit}`, 'success');
@@ -415,7 +409,7 @@ export class IngredientsComponent implements OnInit {
 
   openNewForm(): void {
     this.editId.set(null);
-    this.form.reset({ name: '', barcode: '', default_unit: 'kg', reorder_point: 0, current_stock: 0 });
+    this.form.reset({ name: '', default_unit: 'kg', reorder_point: 0, current_stock: 0 });
     this.formError.set('');
     this.showForm.set(true);
   }
@@ -423,7 +417,7 @@ export class IngredientsComponent implements OnInit {
   startEdit(ing: Ingredient): void {
     this.editId.set(ing.id);
     this.form.setValue({
-      name: ing.name, barcode: ing.barcode,
+      name: ing.name,
       default_unit: ing.default_unit,
       reorder_point: ing.reorder_point,
       current_stock: ing.current_stock,
@@ -447,12 +441,47 @@ export class IngredientsComponent implements OnInit {
     this.formError.set('');
     const v = this.form.getRawValue();
     const isEdit = this.editId();
+    const normalizedName = v.name.trim();
+    const normalizedUnit = v.default_unit.trim();
+    const normalizedCurrentStock = Math.max(0, Number(v.current_stock) || 0);
+    const normalizedReorderPoint = Math.max(0, Number(v.reorder_point) || 0);
+
+    let ingredientId = isEdit;
+    const duplicateError = await this.validateDuplicateIngredient(normalizedName, isEdit);
+    if (duplicateError) {
+      this.formError.set(duplicateError);
+      this.saving.set(false);
+      return;
+    }
+
     if (isEdit) {
-      const { error } = await this.supabase.client.from('gg_ingredients').update(v).eq('id', isEdit);
+      const { error } = await this.supabase.client
+        .from('gg_ingredients')
+        .update({ name: normalizedName, default_unit: normalizedUnit, active: true })
+        .eq('id', isEdit);
       if (error) { this.formError.set(error.message); this.saving.set(false); return; }
     } else {
-      const { error } = await this.supabase.client.from('gg_ingredients').insert(v);
-      if (error) { this.formError.set(error.message); this.saving.set(false); return; }
+      const { data, error } = await this.supabase.client
+        .from('gg_ingredients')
+        .insert({ name: normalizedName, default_unit: normalizedUnit, active: true })
+        .select('id')
+        .single();
+      if (error || !data) { this.formError.set(error?.message ?? 'Failed to create ingredient.'); this.saving.set(false); return; }
+      ingredientId = data.id as string;
+    }
+
+    const { error: inventoryError } = await this.supabase.client
+      .from('inventory_raw_materials')
+      .upsert({
+        ingredient_id: ingredientId,
+        current_qty: normalizedCurrentStock,
+        unit: normalizedUnit,
+        low_stock_threshold: normalizedReorderPoint,
+      }, { onConflict: 'ingredient_id' });
+    if (inventoryError) {
+      this.formError.set(inventoryError.message);
+      this.saving.set(false);
+      return;
     }
     this.showToast(isEdit ? 'Ingredient updated' : 'Ingredient added', 'success');
     this.closeForm();
@@ -463,6 +492,7 @@ export class IngredientsComponent implements OnInit {
 
   async deleteIngredient(id: string): Promise<void> {
     if (!confirm('Delete this ingredient?')) return;
+    await this.supabase.client.from('inventory_raw_materials').delete().eq('ingredient_id', id);
     const { error } = await this.supabase.client.from('gg_ingredients').delete().eq('id', id);
     if (error) { this.showToast(error.message, 'error'); return; }
     this.showToast('Ingredient deleted', 'success');
@@ -474,15 +504,21 @@ export class IngredientsComponent implements OnInit {
 
   private async loadData(): Promise<void> {
     this.loading.set(true);
-    const [{ data: ings }, { data: vi }] = await Promise.all([
+    const [{ data: ings }, { data: inventory }, { data: vi }] = await Promise.all([
       this.supabase.client
         .from('gg_ingredients')
-        .select('id, name, barcode, default_unit, reorder_point, current_stock')
+        .select('id, name, default_unit')
         .order('name'),
+      this.supabase.client
+        .from('inventory_raw_materials')
+        .select('ingredient_id, current_qty, unit, low_stock_threshold'),
       this.supabase.client
         .from('gg_vendor_ingredients')
         .select('ingredient_id, gg_vendors(name)'),
     ]);
+
+    const inventoryMap = new Map<string, any>();
+    (inventory ?? []).forEach((row: any) => inventoryMap.set(row.ingredient_id, row));
 
     const vendorMap = new Map<string, string[]>();
     (vi ?? []).forEach((row: any) => {
@@ -491,13 +527,34 @@ export class IngredientsComponent implements OnInit {
     });
 
     this.ingredients.set((ings ?? []).map((i: any) => ({
-      id: i.id, name: i.name, barcode: i.barcode ?? '',
-      default_unit: i.default_unit ?? 'kg',
-      reorder_point: i.reorder_point ?? 0,
-      current_stock: i.current_stock ?? 0,
+      id: i.id, name: i.name,
+      default_unit: inventoryMap.get(i.id)?.unit ?? i.default_unit ?? 'kg',
+      reorder_point: inventoryMap.get(i.id)?.low_stock_threshold ?? 0,
+      current_stock: inventoryMap.get(i.id)?.current_qty ?? 0,
       vendor_names: vendorMap.get(i.id) ?? [],
     })));
     this.loading.set(false);
+  }
+
+  private async validateDuplicateIngredient(name: string, currentId: string | null): Promise<string | null> {
+    let query = this.supabase.client
+      .from('gg_ingredients')
+      .select('id, name')
+      .ilike('name', name)
+      .limit(1);
+
+    if (currentId) {
+      query = query.neq('id', currentId);
+    }
+
+    const { data, error } = await query.maybeSingle();
+    if (error) {
+      return `Unable to validate ingredient name: ${error.message}`;
+    }
+    if (data) {
+      return `Ingredient "${name}" already exists.`;
+    }
+    return null;
   }
 
   private showToast(msg: string, kind: 'success' | 'error'): void {

@@ -458,7 +458,7 @@ export class UsersComponent implements OnInit {
       return;
     }
 
-    const workerId = `worker-${phoneTrimmed}-${Date.now()}`;
+    const workerId = crypto.randomUUID();
     const modules = [...this.selectedModules()];
 
     const { error: workerError } = await this.supabase.client
@@ -630,5 +630,47 @@ export class UsersComponent implements OnInit {
   private setEditStatus(message: string, kind: 'success' | 'error'): void {
     this.editStatusKind.set(kind);
     this.editStatusMessage.set(message);
+  }
+
+  private async syncWorkerToGgUsers(
+    name: string,
+    phone: string,
+    modules: WorkerModule[],
+    active: boolean,
+  ): Promise<void> {
+    const username = `worker_${phone}`;
+    const existing = await this.supabase.client
+      .from('gg_users')
+      .select('id')
+      .eq('mobile_number', phone)
+      .maybeSingle();
+
+    const payload = {
+      name,
+      username,
+      role: 'worker',
+      modules,
+      mobile_number: phone,
+      active,
+    };
+
+    if (existing.data?.id) {
+      const { error } = await this.supabase.client
+        .from('gg_users')
+        .update(payload)
+        .eq('id', existing.data.id);
+      if (error) {
+        throw new Error(error.message);
+      }
+      return;
+    }
+
+    const { error } = await this.supabase.client
+      .from('gg_users')
+      .insert(payload);
+
+    if (error) {
+      throw new Error(error.message);
+    }
   }
 }
