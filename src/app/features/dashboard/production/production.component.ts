@@ -2,6 +2,7 @@ import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SupabaseService } from '../../../core/supabase.service';
+import { WorkerDirectoryService } from '../../../core/services/worker-directory.service';
 import { ProductionBatch, FlavorDefinition } from '../../../shared/models/manufacturing.models';
 import { SearchableSelectComponent, SearchableSelectOption } from '../../../shared/components/searchable-select.component';
 
@@ -182,6 +183,8 @@ import { SearchableSelectComponent, SearchableSelectOption } from '../../../shar
                 <th>Batch Code</th>
                 <th>Flavor</th>
                 <th>SKU</th>
+                <th>Recipe</th>
+                <th>Worker</th>
                 <th>Date</th>
                 <th>Status</th>
                 <th style="text-align:right;">Planned</th>
@@ -198,6 +201,8 @@ import { SearchableSelectComponent, SearchableSelectOption } from '../../../shar
                     </span>
                   </td>
                   <td>{{ batch.sku?.name ?? batch.sku_id }}</td>
+                  <td>{{ getRecipeLabel(batch) }}</td>
+                  <td>{{ getWorkerLabel(batch.worker_id) }}</td>
                   <td>{{ batch.production_date }}</td>
                   <td>
                     <span [class]="'status-badge ' + (batch.status === 'packed' ? 'status-packed' : 'status-open')">
@@ -217,7 +222,9 @@ import { SearchableSelectComponent, SearchableSelectOption } from '../../../shar
 })
 export class ProductionComponent implements OnInit {
   private supabase = inject(SupabaseService);
+  private workerDirectory = inject(WorkerDirectoryService);
   private readonly uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  readonly workerMap = this.workerDirectory.workers;
 
   batches = signal<ProductionBatch[]>([]);
   flavors = signal<FlavorDefinition[]>([]);
@@ -254,6 +261,7 @@ export class ProductionComponent implements OnInit {
   );
 
   ngOnInit(): void {
+    void this.workerDirectory.refresh();
     this.load();
     this.loadFlavors();
     this.loadRecipes();
@@ -269,8 +277,9 @@ export class ProductionComponent implements OnInit {
     this.loading.set(true);
     const { data, error } = await this.supabase.client
       .from('production_batches')
-      .select('*, sku:gg_flavors!production_batches_sku_id_fkey(id,name,code), flavor:gg_flavors!production_batches_flavor_id_fkey(id,name,code)')
+      .select('*, sku:gg_flavors!production_batches_sku_id_fkey(id,name,code), flavor:gg_flavors!production_batches_flavor_id_fkey(id,name,code), recipe:gg_recipes(id,title,code)')
       .order('production_date', { ascending: false })
+      .order('created_at', { ascending: false })
       .limit(100);
     if (!error && data) this.batches.set(data as ProductionBatch[]);
     this.loading.set(false);
@@ -288,10 +297,10 @@ export class ProductionComponent implements OnInit {
   async loadRecipes(): Promise<void> {
     const { data } = await this.supabase.client
       .from('gg_recipes')
-      .select('id, name, code, is_active')
+      .select('id, title, code, is_active')
       .eq('is_active', true)
-      .order('name');
-    if (data) this.recipes.set(data.map((r: any) => ({ id: r.id, name: r.name, code: r.code })));
+      .order('title');
+    if (data) this.recipes.set(data.map((r: any) => ({ id: r.id, name: r.title, code: r.code })));
   }
 
   async createFlavor(name: string): Promise<void> {
@@ -373,6 +382,15 @@ export class ProductionComponent implements OnInit {
     if (name.includes('berry') || name.includes('straw') || name.includes('bubble')) return 'berry';
     if (name.includes('lemon') || name.includes('citrus') || name.includes('watermelon')) return 'citrus';
     return 'default';
+  }
+
+  getRecipeLabel(batch: ProductionBatch): string {
+    return batch.recipe?.title ?? batch.recipe?.code ?? batch.recipe_id ?? '—';
+  }
+
+  getWorkerLabel(workerId: string | null | undefined): string {
+    if (!workerId) return '—';
+    return this.workerMap()[workerId]?.name ?? workerId;
   }
 
   subscribeRealtime(): void {

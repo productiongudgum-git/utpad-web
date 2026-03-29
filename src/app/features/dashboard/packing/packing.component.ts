@@ -2,7 +2,8 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SupabaseService } from '../../../core/supabase.service';
-import { PackingSession, FlavorDefinition } from '../../../shared/models/manufacturing.models';
+import { WorkerDirectoryService } from '../../../core/services/worker-directory.service';
+import { PackingSession } from '../../../shared/models/manufacturing.models';
 
 interface BatchFlavorOption {
   batch_code: string;
@@ -177,6 +178,7 @@ interface BatchFlavorOption {
               <tr>
                 <th>Batch Code</th>
                 <th>Flavor</th>
+                <th>Worker</th>
                 <th>Date</th>
                 <th style="text-align:right;">Boxes Packed</th>
               </tr>
@@ -190,6 +192,7 @@ interface BatchFlavorOption {
                       {{ session.flavor?.name ?? session.flavor_id ?? getSkuName(session) }}
                     </span>
                   </td>
+                  <td>{{ getWorkerLabel(session.worker_id) }}</td>
                   <td>{{ session.session_date }}</td>
                   <td style="text-align:right;font-weight:600;">{{ session.boxes_packed }}</td>
                 </tr>
@@ -203,7 +206,9 @@ interface BatchFlavorOption {
 })
 export class PackingComponent implements OnInit {
   private supabase = inject(SupabaseService);
+  private workerDirectory = inject(WorkerDirectoryService);
   private readonly uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  readonly workerMap = this.workerDirectory.workers;
 
   sessions = signal<PackingSession[]>([]);
   batchFlavors = signal<BatchFlavorOption[]>([]);
@@ -221,6 +226,7 @@ export class PackingComponent implements OnInit {
   newWorkerId = '';
 
   ngOnInit(): void {
+    void this.workerDirectory.refresh();
     this.load();
     this.loadBatchFlavors();
     this.subscribeRealtime();
@@ -323,10 +329,15 @@ export class PackingComponent implements OnInit {
     return this.getFlavorClass(s.flavor?.name ?? '');
   }
 
+  getWorkerLabel(workerId: string | null | undefined): string {
+    if (!workerId) return '—';
+    return this.workerMap()[workerId]?.name ?? workerId;
+  }
+
   subscribeRealtime(): void {
     this.supabase.client
       .channel('packing-rt')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'packing_sessions' }, () => this.load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'packing_sessions' }, () => this.load())
       .subscribe();
   }
 

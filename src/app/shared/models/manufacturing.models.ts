@@ -41,9 +41,9 @@ export interface ProductionBatch {
   id?: string;
   batch_code: string;
   sku_id: string;
-  recipe_id: string;
+  recipe_id: string | null;
   production_date: string;
-  worker_id: string;
+  worker_id: string | null;
   flavor_id: string | null;
   status: 'open' | 'packed';
   planned_yield: number | null;
@@ -52,6 +52,7 @@ export interface ProductionBatch {
   // Joined
   sku?: FlavorDefinition;
   flavor?: FlavorDefinition;
+  recipe?: { id?: string; title?: string; code?: string };
 }
 
 export interface ProductionBatchIngredient {
@@ -70,7 +71,7 @@ export interface PackingSession {
   batch_code: string;
   flavor_id: string | null;
   session_date: string;
-  worker_id: string;
+  worker_id: string | null;
   boxes_packed: number;
   created_at: string;
   // Joined
@@ -85,7 +86,7 @@ export interface DispatchEvent {
   customer_name: string | null;
   invoice_number: string;
   dispatch_date: string;
-  worker_id: string;
+  worker_id: string | null;
   created_at: string;
   // Joined
   sku?: FlavorDefinition;
@@ -111,7 +112,7 @@ export interface InwardEvent {
   inward_date: string;
   expiry_date: string | null;
   lot_ref: string | null;
-  worker_id: string;
+  worker_id: string | null;
   created_at: string;
   // Joined
   ingredient?: RecipeIngredient;

@@ -1,6 +1,7 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { SupabaseService } from '../../../core/supabase.service';
+import { WorkerDirectoryService } from '../../../core/services/worker-directory.service';
 import { InwardEvent } from '../../../shared/models/manufacturing.models';
 
 @Component({
@@ -29,6 +30,7 @@ import { InwardEvent } from '../../../shared/models/manufacturing.models';
                 <th class="px-4 py-3 text-left font-medium text-gray-500">Date</th>
                 <th class="px-4 py-3 text-left font-medium text-gray-500">Lot Ref</th>
                 <th class="px-4 py-3 text-left font-medium text-gray-500">Supplier</th>
+                <th class="px-4 py-3 text-left font-medium text-gray-500">Worker</th>
                 <th class="px-4 py-3 text-left font-medium text-gray-500">Expiry</th>
               </tr>
             </thead>
@@ -41,6 +43,7 @@ import { InwardEvent } from '../../../shared/models/manufacturing.models';
                   <td class="px-4 py-3">{{ event.inward_date }}</td>
                   <td class="px-4 py-3 font-mono text-xs">{{ event.lot_ref ?? '—' }}</td>
                   <td class="px-4 py-3">{{ event.vendor?.name ?? '—' }}</td>
+                  <td class="px-4 py-3">{{ getWorkerLabel(event.worker_id) }}</td>
                   <td class="px-4 py-3" [class.text-red-600]="isExpiringSoon(event.expiry_date)">
                     {{ event.expiry_date ?? '—' }}
                   </td>
@@ -55,11 +58,14 @@ import { InwardEvent } from '../../../shared/models/manufacturing.models';
 })
 export class InwardingComponent implements OnInit {
   private supabase = inject(SupabaseService);
+  private workerDirectory = inject(WorkerDirectoryService);
 
+  readonly workerMap = this.workerDirectory.workers;
   events = signal<InwardEvent[]>([]);
   loading = signal(false);
 
   ngOnInit(): void {
+    void this.workerDirectory.refresh();
     this.load();
     this.subscribeRealtime();
   }
@@ -70,6 +76,7 @@ export class InwardingComponent implements OnInit {
       .from('gg_inwarding')
       .select('*, ingredient:gg_ingredients(id,name,default_unit,active), vendor:gg_vendors(name)')
       .order('inward_date', { ascending: false })
+      .order('created_at', { ascending: false })
       .limit(100);
     if (!error && data) this.events.set(data as InwardEvent[]);
     this.loading.set(false);
@@ -78,7 +85,7 @@ export class InwardingComponent implements OnInit {
   subscribeRealtime(): void {
     this.supabase.client
       .channel('inwarding-rt')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'gg_inwarding' }, () => this.load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'gg_inwarding' }, () => this.load())
       .subscribe();
   }
 
@@ -86,5 +93,10 @@ export class InwardingComponent implements OnInit {
     if (!expiryDate) return false;
     const daysUntilExpiry = (new Date(expiryDate).getTime() - Date.now()) / 86400000;
     return daysUntilExpiry <= 7;
+  }
+
+  getWorkerLabel(workerId: string | null | undefined): string {
+    if (!workerId) return '—';
+    return this.workerMap()[workerId]?.name ?? workerId;
   }
 }

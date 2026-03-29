@@ -2,7 +2,8 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SupabaseService } from '../../../core/supabase.service';
-import { DispatchEvent, FlavorDefinition } from '../../../shared/models/manufacturing.models';
+import { WorkerDirectoryService } from '../../../core/services/worker-directory.service';
+import { DispatchEvent } from '../../../shared/models/manufacturing.models';
 
 interface BatchFlavorOption {
   batch_code: string;
@@ -187,6 +188,7 @@ interface BatchFlavorOption {
                 <th>Customer</th>
                 <th>Flavor / SKU</th>
                 <th>Batch</th>
+                <th>Worker</th>
                 <th style="text-align:right;">Boxes</th>
                 <th>Date</th>
               </tr>
@@ -202,6 +204,7 @@ interface BatchFlavorOption {
                     </span>
                   </td>
                   <td style="font-family:monospace;font-size:12px;">{{ event.batch_code }}</td>
+                  <td>{{ getWorkerLabel(event.worker_id) }}</td>
                   <td style="text-align:right;font-weight:600;">{{ event.boxes_dispatched }}</td>
                   <td>{{ event.dispatch_date }}</td>
                 </tr>
@@ -215,7 +218,9 @@ interface BatchFlavorOption {
 })
 export class DispatchComponent implements OnInit {
   private supabase = inject(SupabaseService);
+  private workerDirectory = inject(WorkerDirectoryService);
   private readonly uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  readonly workerMap = this.workerDirectory.workers;
 
   events = signal<DispatchEvent[]>([]);
   batchFlavors = signal<BatchFlavorOption[]>([]);
@@ -235,6 +240,7 @@ export class DispatchComponent implements OnInit {
   newWorkerId = '';
 
   ngOnInit(): void {
+    void this.workerDirectory.refresh();
     this.load();
     this.loadBatchFlavors();
     this.subscribeRealtime();
@@ -257,6 +263,7 @@ export class DispatchComponent implements OnInit {
       .from('dispatch_events')
       .select('*, sku:gg_flavors(id,name,code)')
       .order('dispatch_date', { ascending: false })
+      .order('created_at', { ascending: false })
       .limit(100);
     if (!error && data) this.events.set(data as DispatchEvent[]);
     this.loading.set(false);
@@ -337,10 +344,15 @@ export class DispatchComponent implements OnInit {
     return this.getFlavorClass(e.sku?.name ?? '');
   }
 
+  getWorkerLabel(workerId: string | null | undefined): string {
+    if (!workerId) return '—';
+    return this.workerMap()[workerId]?.name ?? workerId;
+  }
+
   subscribeRealtime(): void {
     this.supabase.client
       .channel('dispatch-rt')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dispatch_events' }, () => this.load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'dispatch_events' }, () => this.load())
       .subscribe();
   }
 
