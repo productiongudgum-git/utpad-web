@@ -5,6 +5,7 @@ import { SupabaseService } from '../../../core/supabase.service';
 import { SearchableSelectComponent, SearchableSelectOption } from '../../../shared/components/searchable-select.component';
 
 const UNITS = ['kg', 'g', 'L', 'ml', 'pcs'] as const;
+<<<<<<< HEAD
 
 interface Flavor     { id: string; name: string; code: string; }
 interface Ingredient { id: string; name: string; default_unit: string; }
@@ -16,6 +17,32 @@ interface RecipeIngredient {
   unit: string;
 }
 
+=======
+type Unit = typeof UNITS[number];
+
+interface BatchOption {
+  units: number;
+  boxes: number;
+  rawMaterialKg: number;
+  expectedYieldKg: number;
+}
+
+const BATCH_OPTIONS: BatchOption[] = [
+  { units: 7500,  boxes: 500, rawMaterialKg: 15, expectedYieldKg: 10.5 },
+  { units: 10000, boxes: 667, rawMaterialKg: 20, expectedYieldKg: 14 },
+];
+
+interface Flavor     { id: string; name: string; code: string; }
+interface Ingredient { id: string; name: string; default_unit: string; }
+
+interface RecipeIngredient {
+  ingredient_id: string;
+  name: string;
+  quantity: number;
+  unit: string;
+}
+
+>>>>>>> bdc4f38 (Add wastage page, invoice management, dispatch window, batch size dropdown)
 interface RecipeRow {
   id: string;
   name: string;
@@ -39,6 +66,7 @@ interface IngLine {
   imports: [CommonModule, DecimalPipe, ReactiveFormsModule, FormsModule, SearchableSelectComponent],
   template: `
     <!-- ── toast ──────────────────────────────────────────────────────────── -->
+<<<<<<< HEAD
     @if (toast()) {
       <div class="rcp-toast" [class.rcp-toast-err]="toastKind() === 'error'">
         <span class="material-icons-round" style="font-size:16px;">{{ toastKind() === 'error' ? 'error_outline' : 'check_circle' }}</span>
@@ -88,6 +116,57 @@ interface IngLine {
                 }
               </div>
 
+=======
+    @if (toast()) {
+      <div class="rcp-toast" [class.rcp-toast-err]="toastKind() === 'error'">
+        <span class="material-icons-round" style="font-size:16px;">{{ toastKind() === 'error' ? 'error_outline' : 'check_circle' }}</span>
+        {{ toast() }}
+      </div>
+    }
+
+    <div style="padding:24px;max-width:1140px;">
+
+      <!-- ── Page header ─────────────────────────────────────────────────── -->
+      <div style="margin-bottom:24px;display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+        <div>
+          <h1 style="font-size:22px;font-weight:700;color:var(--foreground);margin:0 0 4px;font-family:'Cabin',sans-serif;">Recipes</h1>
+          <p style="color:#6B7280;font-size:14px;margin:0;">Build bills of materials for each flavor variant.</p>
+        </div>
+        <button (click)="openNewForm()" [disabled]="showForm() && !editId()"
+                style="padding:9px 18px;background:#01AC51;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;opacity:1;"
+                [style.opacity]="showForm() && !editId() ? '0.6' : '1'">
+          <span class="material-icons-round" style="font-size:18px;">add</span>
+          New Recipe
+        </button>
+      </div>
+
+      <!-- ── Recipe form ─────────────────────────────────────────────────── -->
+      @if (showForm()) {
+        <div class="recipe-form-card" style="background:var(--card);border-radius:14px;border:1px solid var(--border);padding:24px;margin-bottom:24px;animation:slideDown 0.15s ease;">
+
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+            <h2 style="font-size:16px;font-weight:700;color:var(--foreground);margin:0;">
+              {{ editId() ? 'Edit Recipe' : 'New Recipe' }}
+            </h2>
+            <button (click)="closeForm()" style="border:none;background:none;cursor:pointer;color:#9CA3AF;display:flex;align-items:center;">
+              <span class="material-icons-round" style="font-size:20px;">close</span>
+            </button>
+          </div>
+
+          <form [formGroup]="form" (ngSubmit)="save()">
+
+            <!-- Meta fields -->
+            <div class="rcp-meta-grid" style="display:grid;grid-template-columns:2fr 1fr 2fr;gap:14px;margin-bottom:20px;">
+              <div>
+                <label class="rcp-label">Recipe Name *</label>
+                <input formControlName="name" class="gg-input" placeholder="e.g. Spearmint Base v2"
+                       [style.border-color]="form.get('name')!.invalid && form.get('name')!.touched ? '#dc2626' : ''">
+                @if (form.get('name')!.invalid && form.get('name')!.touched) {
+                  <p style="color:#dc2626;font-size:11px;margin:3px 0 0;">Required</p>
+                }
+              </div>
+
+>>>>>>> bdc4f38 (Add wastage page, invoice management, dispatch window, batch size dropdown)
               <div>
                 <label class="rcp-label">Flavor *
                   <span style="font-weight:400;color:#9CA3AF;">(search existing or add new)</span>
@@ -104,6 +183,7 @@ interface IngLine {
                   (createRequested)="createFlavorFromPicker($event)">
                 </app-searchable-select>
               </div>
+<<<<<<< HEAD
 
               <div>
                 <label class="rcp-label">Batch Size (kg) *</label>
@@ -115,6 +195,41 @@ interface IngLine {
             <!-- Ingredients table -->
             <div style="margin-bottom:20px;display:flex;flex-direction:column;min-height:440px;">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+=======
+
+              <div>
+                <label class="rcp-label">Version</label>
+                <input formControlName="version" type="number" min="1" class="gg-input" placeholder="1">
+              </div>
+
+              <div style="grid-column:span 2;">
+                <label class="rcp-label">Batch Size *</label>
+                <select [ngModel]="selectedBatchUnits()" [ngModelOptions]="{standalone:true}"
+                        (ngModelChange)="onBatchUnitsChange($event)" class="gg-input dropdown-with-arrow">
+                  @for (opt of BATCH_OPTIONS; track opt.units) {
+                    <option [value]="opt.units">{{ opt.units | number }} units</option>
+                  }
+                </select>
+                @if (selectedBatchOption(); as opt) {
+                  <div style="margin-top:6px;display:flex;gap:10px;flex-wrap:wrap;">
+                    <span style="font-size:11px;padding:3px 8px;border-radius:5px;background:#f0fdf4;border:1px solid #bbf7d0;color:#15803d;font-weight:600;">
+                      {{ opt.boxes }} boxes
+                    </span>
+                    <span style="font-size:11px;padding:3px 8px;border-radius:5px;background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;font-weight:600;">
+                      {{ opt.rawMaterialKg }} kg raw material
+                    </span>
+                    <span style="font-size:11px;padding:3px 8px;border-radius:5px;background:#fef3c7;border:1px solid #fde68a;color:#b45309;font-weight:600;">
+                      {{ opt.expectedYieldKg }} kg expected yield
+                    </span>
+                  </div>
+                }
+              </div>
+            </div>
+
+            <!-- Ingredients table -->
+            <div style="margin-bottom:20px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+>>>>>>> bdc4f38 (Add wastage page, invoice management, dispatch window, batch size dropdown)
                 <label class="rcp-label" style="margin:0;">Ingredients
                   <span style="font-weight:400;color:#9CA3AF;font-size:11px;"> — search existing ingredients or add them inline</span>
                 </label>
@@ -255,6 +370,7 @@ interface IngLine {
                       @if (!r.is_active) {
                         <span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;">Inactive</span>
                       }
+<<<<<<< HEAD
                     </div>
                     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                       <span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#374151;background:#f0fdf4;border:1px solid #bbf7d0;padding:2px 8px;border-radius:6px;font-weight:500;">
@@ -277,6 +393,31 @@ interface IngLine {
                       <span class="material-icons-round" style="font-size:14px;">edit</span> Edit
                     </button>
                     <button (click)="cloneRecipe(r)" title="Duplicate recipe"
+=======
+                    </div>
+                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                      <span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#374151;background:#f0fdf4;border:1px solid #bbf7d0;padding:2px 8px;border-radius:6px;font-weight:500;">
+                        <span class="material-icons-round" style="font-size:13px;color:#16a34a;">local_dining</span>
+                        {{ r.flavor_name }}
+                      </span>
+                      <span style="font-size:12px;color:#6B7280;">·</span>
+                      <span style="font-size:12px;color:#6B7280;">
+                        <strong style="color:#374151;">{{ batchUnitsFromKg(r.batch_size_kg) | number }} units</strong>
+                        ({{ r.batch_size_kg }} kg raw)
+                      </span>
+                      <span style="font-size:12px;color:#6B7280;">·</span>
+                      <span style="font-size:12px;color:#6B7280;">{{ r.ingredients.length }} ingredient{{ r.ingredients.length === 1 ? '' : 's' }}</span>
+                    </div>
+                  </div>
+
+                  <!-- Right: actions + chevron -->
+                  <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;" (click)="$event.stopPropagation()">
+                    <button (click)="startEdit(r)"
+                            style="padding:6px 12px;background:#f0fdf4;border:1px solid #01AC51;color:#01AC51;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;">
+                      <span class="material-icons-round" style="font-size:14px;">edit</span> Edit
+                    </button>
+                    <button (click)="cloneRecipe(r)" title="Duplicate as next version"
+>>>>>>> bdc4f38 (Add wastage page, invoice management, dispatch window, batch size dropdown)
                             style="padding:6px 12px;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;">
                       <span class="material-icons-round" style="font-size:14px;">content_copy</span> Clone
                     </button>
@@ -372,6 +513,7 @@ interface IngLine {
       @keyframes slideUp { from { transform:translateY(16px); opacity:0; } to { transform:translateY(0); opacity:1; } }
       @keyframes slideDown { from { transform:translateY(-8px); opacity:0; } to { transform:translateY(0); opacity:1; } }
       @keyframes spin { to { transform:rotate(360deg); } }
+<<<<<<< HEAD
       .rcp-spin { animation: spin 0.8s linear infinite; }
       @media (max-width:760px) { .rcp-meta-grid { grid-template-columns: 1fr 1fr !important; } }
       @media (max-width:480px) { .rcp-meta-grid { grid-template-columns: 1fr !important; } }
@@ -398,6 +540,56 @@ export class RecipesAdminComponent implements OnInit {
   toastKind  = signal<'success' | 'error'>('success');
 
   selectedFlavorId = signal('');
+=======
+      .rcp-spin { animation: spin 0.8s linear infinite; }
+      @media (max-width:760px) { .rcp-meta-grid { grid-template-columns: 1fr 1fr !important; } }
+      @media (max-width:480px) { .rcp-meta-grid { grid-template-columns: 1fr !important; } }
+      .rcp-meta-grid > div:last-child { grid-column: 1 / -1; }
+    </style>
+  `,
+})
+export class RecipesAdminComponent implements OnInit {
+  private readonly supabase = inject(SupabaseService);
+  private readonly fb = inject(FormBuilder);
+
+  readonly UNITS = UNITS;
+  readonly BATCH_OPTIONS = BATCH_OPTIONS;
+
+  loading    = signal(true);
+  saving     = signal(false);
+  showForm   = signal(false);
+  editId     = signal<string | null>(null);
+  recipes    = signal<RecipeRow[]>([]);
+  flavors    = signal<Flavor[]>([]);
+  ingredients = signal<Ingredient[]>([]);
+  ingLines   = signal<IngLine[]>([]);
+  expanded   = signal<Set<string>>(new Set());
+  formError  = signal('');
+  toast      = signal('');
+  toastKind  = signal<'success' | 'error'>('success');
+
+  // Batch size selection
+  selectedBatchUnits = signal<number>(7500);
+  readonly selectedBatchOption = computed(() =>
+    this.BATCH_OPTIONS.find(o => o.units === this.selectedBatchUnits()) ?? this.BATCH_OPTIONS[0]
+  );
+
+  onBatchUnitsChange(units: number | string): void {
+    const n = Number(units);
+    this.selectedBatchUnits.set(n);
+    const opt = this.BATCH_OPTIONS.find(o => o.units === n);
+    if (opt) this.form.patchValue({ batch_size_kg: opt.rawMaterialKg });
+  }
+
+  batchUnitsFromKg(kg: number): number {
+    return this.BATCH_OPTIONS.find(o => o.rawMaterialKg === kg)?.units ?? kg * (7500 / 15);
+  }
+
+  // Flavor combobox
+  flavorNameInput = '';
+  flavorHint = signal('');
+  flavorIsNew = signal(false);
+>>>>>>> bdc4f38 (Add wastage page, invoice management, dispatch window, batch size dropdown)
 
   // Search
   rawSearch = '';
@@ -435,7 +627,12 @@ export class RecipesAdminComponent implements OnInit {
 
   form = this.fb.nonNullable.group({
     name:          ['', Validators.required],
+<<<<<<< HEAD
     batch_size_kg: [100, [Validators.required, Validators.min(0.1)]],
+=======
+    version:       [1, [Validators.required, Validators.min(1)]],
+    batch_size_kg: [15, [Validators.required, Validators.min(0.1)]],
+>>>>>>> bdc4f38 (Add wastage page, invoice management, dispatch window, batch size dropdown)
   });
 
   async ngOnInit(): Promise<void> {
@@ -476,9 +673,17 @@ export class RecipesAdminComponent implements OnInit {
 
   openNewForm(): void {
     this.editId.set(null);
+<<<<<<< HEAD
     this.form.reset({ name: '', batch_size_kg: 100 });
     this.selectedFlavorId.set('');
     this.ingLines.set([{ ingredientId: '', ingredientName: '', quantity: 0, unit: 'kg' }]);
+=======
+    this.selectedBatchUnits.set(7500);
+    this.form.reset({ name: '', version: this.nextDefaultVersion(), batch_size_kg: 15 });
+    this.flavorNameInput = '';
+    this.flavorHint.set('');
+    this.ingLines.set([{ ingredientName: '', quantity: 0, unit: 'kg' }]);
+>>>>>>> bdc4f38 (Add wastage page, invoice management, dispatch window, batch size dropdown)
     this.formError.set('');
     this.showForm.set(true);
     setTimeout(() => document.querySelector('.recipe-form-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
@@ -486,8 +691,17 @@ export class RecipesAdminComponent implements OnInit {
 
   startEdit(r: RecipeRow): void {
     this.editId.set(r.id);
+<<<<<<< HEAD
     this.form.setValue({ name: r.name, batch_size_kg: r.batch_size_kg });
     this.selectedFlavorId.set(r.flavor_id);
+=======
+    const batchOpt = this.BATCH_OPTIONS.find(o => o.rawMaterialKg === r.batch_size_kg) ?? this.BATCH_OPTIONS[0];
+    this.selectedBatchUnits.set(batchOpt.units);
+    this.form.setValue({ name: r.name, version: r.version, batch_size_kg: r.batch_size_kg });
+    this.flavorNameInput = r.flavor_name;
+    this.flavorHint.set('✓ Existing flavor');
+    this.flavorIsNew.set(false);
+>>>>>>> bdc4f38 (Add wastage page, invoice management, dispatch window, batch size dropdown)
     this.ingLines.set(
       r.ingredients.length > 0
         ? r.ingredients.map(i => ({ ingredientId: i.ingredient_id, ingredientName: i.name, quantity: i.quantity, unit: i.unit }))
@@ -509,8 +723,17 @@ export class RecipesAdminComponent implements OnInit {
 
   cloneRecipe(r: RecipeRow): void {
     this.editId.set(null);
+<<<<<<< HEAD
     this.form.setValue({ name: `${r.name} Copy`, batch_size_kg: r.batch_size_kg });
     this.selectedFlavorId.set(r.flavor_id);
+=======
+    const cloneBatchOpt = this.BATCH_OPTIONS.find(o => o.rawMaterialKg === r.batch_size_kg) ?? this.BATCH_OPTIONS[0];
+    this.selectedBatchUnits.set(cloneBatchOpt.units);
+    this.form.setValue({ name: `${baseName} v${nextVersion}`, version: nextVersion, batch_size_kg: r.batch_size_kg });
+    this.flavorNameInput = r.flavor_name;
+    this.flavorHint.set('✓ Existing flavor');
+    this.flavorIsNew.set(false);
+>>>>>>> bdc4f38 (Add wastage page, invoice management, dispatch window, batch size dropdown)
     this.ingLines.set(
       r.ingredients.map(i => ({ ingredientId: i.ingredient_id, ingredientName: i.name, quantity: i.quantity, unit: i.unit }))
     );

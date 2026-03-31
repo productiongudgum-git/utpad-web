@@ -26,6 +26,7 @@ export const routes: Routes = [
       { path: 'vendors', loadComponent: () => import('./features/dashboard/vendors/vendors.component').then(m => m.VendorsComponent) },
       { path: 'customers', loadComponent: () => import('./features/dashboard/customers/customers.component').then(m => m.CustomersComponent) },
       { path: 'team', loadComponent: () => import('./features/dashboard/team/team.component').then(m => m.TeamComponent) },
+<<<<<<< HEAD
       { path: 'sessions', loadComponent: () => import('./features/sessions/sessions.component').then(m => m.SessionsComponent) },
       { path: 'production', loadComponent: () => import('./features/dashboard/production/production.component').then(m => m.ProductionComponent) },
       { path: 'packing', loadComponent: () => import('./features/dashboard/packing/packing.component').then(m => m.PackingComponent) },
@@ -36,3 +37,14 @@ export const routes: Routes = [
   },
   { path: '**', redirectTo: '/auth/login' },
 ];
+=======
+      { path: 'history',  loadComponent: () => import('./features/dashboard/history/history.component').then(m => m.HistoryComponent) },
+      { path: 'bills',    loadComponent: () => import('./features/dashboard/bills/bills.component').then(m => m.BillsComponent) },
+      { path: 'wastage',  loadComponent: () => import('./features/dashboard/wastage/wastage.component').then(m => m.WastageComponent) },
+      { path: 'dispatch', loadComponent: () => import('./features/dashboard/dispatch/dispatch.component').then(m => m.DispatchComponent) },
+      { path: 'invoices', loadComponent: () => import('./features/dashboard/invoices/invoices.component').then(m => m.InvoicesComponent) },
+    ],
+  },
+  { path: '**', redirectTo: '/auth/login' },
+];
+>>>>>>> bdc4f38 (Add wastage page, invoice management, dispatch window, batch size dropdown)
