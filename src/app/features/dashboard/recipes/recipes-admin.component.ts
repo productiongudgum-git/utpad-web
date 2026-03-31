@@ -591,9 +591,9 @@ export class RecipesAdminComponent implements OnInit {
 
       const v = this.form.getRawValue();
       const payload = {
-        title: v.name,
+        name: v.name,
         flavor_id: flavorId,
-        yield_factor: v.batch_size_kg,
+        batch_size_kg: v.batch_size_kg,
         is_active: true,
       };
 
@@ -660,7 +660,7 @@ export class RecipesAdminComponent implements OnInit {
     const [{ data: recipesData }, { data: recipeLines }] = await Promise.all([
       this.supabase.client
         .from('gg_recipes')
-        .select('id, name:title, flavor_id, batch_size_kg:yield_factor, is_active, gg_flavors(name)')
+        .select('id, name, flavor_id, batch_size_kg, is_active, gg_flavors(name)')
         .order('created_at', { ascending: false }),
       this.supabase.client
         .from('recipe_lines')
