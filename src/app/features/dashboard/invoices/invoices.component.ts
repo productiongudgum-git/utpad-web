@@ -9,7 +9,7 @@ interface Flavor   { id: string; name: string; }
 interface InvoiceItem {
   flavor_id: string;
   flavor_name: string;
-  quantity_units: number;
+  quantity_boxes: number;
 }
 
 interface InvoiceRow {
@@ -125,7 +125,7 @@ interface InvoiceRow {
                 <div style="border:1px solid #E5E7EB;border-radius:10px;overflow:hidden;">
                   <div style="display:grid;grid-template-columns:1fr 160px 36px;gap:8px;padding:8px 12px;background:#f8f9fa;border-bottom:1px solid #E5E7EB;">
                     <span style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Flavor</span>
-                    <span style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Quantity (units)</span>
+                    <span style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">No. of Boxes</span>
                     <span></span>
                   </div>
                   @for (line of itemLines(); track $index) {
@@ -138,7 +138,7 @@ interface InvoiceRow {
                           <option [value]="f.id">{{ f.name }}</option>
                         }
                       </select>
-                      <input [(ngModel)]="line.quantity_units" [ngModelOptions]="{standalone:true}"
+                      <input [(ngModel)]="line.quantity_boxes" [ngModelOptions]="{standalone:true}"
                              type="number" min="1" step="1" class="gg-input"
                              placeholder="0" style="font-size:13px;">
                       <button type="button" (click)="removeItemLine($index)"
@@ -149,8 +149,8 @@ interface InvoiceRow {
                   }
                   <!-- Total row -->
                   <div style="display:grid;grid-template-columns:1fr 160px 36px;gap:8px;padding:8px 12px;background:#f8f9fa;align-items:center;">
-                    <span style="font-size:12px;font-weight:600;color:#374151;">Total Units</span>
-                    <span style="font-size:13px;font-weight:700;color:#01AC51;">{{ totalUnits() | number }}</span>
+                    <span style="font-size:12px;font-weight:600;color:#374151;">Total Boxes</span>
+                    <span style="font-size:13px;font-weight:700;color:#01AC51;">{{ totalBoxes() | number }}</span>
                     <span></span>
                   </div>
                 </div>
@@ -217,7 +217,7 @@ interface InvoiceRow {
                   <td style="padding:14px 16px;max-width:280px;">
                     @for (item of inv.items; track item.flavor_id) {
                       <div style="font-size:12px;color:#6B7280;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                        {{ item.flavor_name }}: <strong style="color:#374151;">{{ item.quantity_units | number }}</strong> units
+                        {{ item.flavor_name }}: <strong style="color:#374151;">{{ item.quantity_boxes | number }}</strong> boxes
                       </div>
                     }
                   </td>
@@ -259,7 +259,7 @@ export class InvoicesComponent implements OnInit {
   invoices  = signal<InvoiceRow[]>([]);
   customers = signal<Customer[]>([]);
   flavors   = signal<Flavor[]>([]);
-  itemLines = signal<{ flavor_id: string; flavor_name: string; quantity_units: number }[]>([]);
+  itemLines = signal<{ flavor_id: string; flavor_name: string; quantity_boxes: number }[]>([]);
   formError = signal('');
   toast     = signal('');
   toastKind = signal<'success' | 'error'>('success');
@@ -268,8 +268,8 @@ export class InvoicesComponent implements OnInit {
   customerHint      = signal('');
   customerIsNew     = signal(false);
 
-  readonly totalUnits = computed(() =>
-    this.itemLines().reduce((s, l) => s + (Number(l.quantity_units) || 0), 0)
+  readonly totalBoxes = computed(() =>
+    this.itemLines().reduce((s, l) => s + (Number(l.quantity_boxes) || 0), 0)
   );
 
   form = this.fb.nonNullable.group({
@@ -286,7 +286,7 @@ export class InvoicesComponent implements OnInit {
     this.form.reset({ invoice_number: '', expected_dispatch_date: '' });
     this.customerNameInput = '';
     this.customerHint.set('');
-    this.itemLines.set([{ flavor_id: '', flavor_name: '', quantity_units: 0 }]);
+    this.itemLines.set([{ flavor_id: '', flavor_name: '', quantity_boxes: 0 }]);
     this.formError.set('');
     this.showForm.set(true);
   }
@@ -313,13 +313,13 @@ export class InvoicesComponent implements OnInit {
     }
   }
 
-  onFlavorSelect(line: { flavor_id: string; flavor_name: string; quantity_units: number }): void {
+  onFlavorSelect(line: { flavor_id: string; flavor_name: string; quantity_boxes: number }): void {
     const f = this.flavors().find(fl => fl.id === line.flavor_id);
     if (f) line.flavor_name = f.name;
   }
 
   addItemLine(): void {
-    this.itemLines.update(l => [...l, { flavor_id: '', flavor_name: '', quantity_units: 0 }]);
+    this.itemLines.update(l => [...l, { flavor_id: '', flavor_name: '', quantity_boxes: 0 }]);
   }
 
   removeItemLine(i: number): void {
@@ -333,7 +333,7 @@ export class InvoicesComponent implements OnInit {
     const customerName = this.customerNameInput.trim();
     if (!customerName) { this.formError.set('Please enter a customer name.'); return; }
 
-    const validItems = this.itemLines().filter(l => l.flavor_id && l.quantity_units > 0);
+    const validItems = this.itemLines().filter(l => l.flavor_id && l.quantity_boxes > 0);
     if (validItems.length === 0) { this.formError.set('Add at least one flavor with a quantity.'); return; }
 
     this.saving.set(true);
