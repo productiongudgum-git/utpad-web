@@ -139,7 +139,7 @@ export class BillsComponent implements OnInit {
     const { data, error } = await this.supabase.client
       .from('gg_inwarding')
       .select(`
-        id, qty, unit, inward_date, bill_number, bill_photo_url,
+        id, qty, unit, inward_date, lot_ref, expiry_date,
         gg_ingredients!ingredient_id ( name ),
         gg_vendors!vendor_id ( name )
       `)
@@ -152,8 +152,8 @@ export class BillsComponent implements OnInit {
       qty: row.qty,
       unit: row.unit,
       inward_date: row.inward_date,
-      bill_number: row.bill_number ?? null,
-      bill_photo_url: row.bill_photo_url ?? null,
+      bill_number: row.lot_ref ?? null,   // lot_ref used as bill/lot reference
+      bill_photo_url: null,               // no photo URL column in gg_inwarding
     }));
 
     this.bills.set(mapped);

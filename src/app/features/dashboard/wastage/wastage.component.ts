@@ -214,9 +214,9 @@ export class WastageComponent implements OnInit {
     this.loading.set(true);
 
     const { data, error } = await this.supabase.client
-      .from('gg_production')
-      .select('manufacturing_date, actual_output_kg, batch_size, batch_id, gg_batches(batch_code, gg_flavors(name))')
-      .order('manufacturing_date', { ascending: false })
+      .from('production_batches')
+      .select('production_date, actual_yield, planned_yield, batch_code, flavor:gg_flavors!production_batches_flavor_id_fkey(name)')
+      .order('production_date', { ascending: false })
       .limit(500);
 
     if (error) {
@@ -226,21 +226,21 @@ export class WastageComponent implements OnInit {
     }
 
     const list: WastageRow[] = (data ?? []).map((p: any) => {
-      const batchSizeUnits: number = p.batch_size ?? 7500;
+      const batchSizeUnits: number = p.planned_yield ?? 7500;
       const batchOpt = BATCH_OPTIONS.find(o => o.units === batchSizeUnits) ?? BATCH_OPTIONS[0];
 
       const rawMaterialKg   = batchOpt.rawMaterialKg;
       const expectedYieldKg = batchOpt.expectedYieldKg;
-      const actualYieldKg   = p.actual_output_kg ?? 0;
+      const actualYieldKg   = p.actual_yield ?? 0;
       const kgWasted        = Math.max(0, rawMaterialKg - actualYieldKg);
       const actualUnits     = Math.round(actualYieldKg * UNITS_PER_KG);
       const unitsLess       = Math.max(0, batchSizeUnits - actualUnits);
       const boxesLess       = unitsLess / 15;
 
       return {
-        batchCode:      p.gg_batches?.batch_code ?? '—',
-        flavorName:     p.gg_batches?.gg_flavors?.name ?? 'Unknown',
-        date:           (p.manufacturing_date ?? '').substring(0, 10),
+        batchCode:      p.batch_code ?? '—',
+        flavorName:     (p.flavor as any)?.name ?? 'Unknown',
+        date:           (p.production_date ?? '').substring(0, 10),
         batchSizeUnits,
         rawMaterialKg,
         actualYieldKg,
