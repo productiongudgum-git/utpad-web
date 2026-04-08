@@ -14,6 +14,13 @@ interface DispatchRow {
   items_summary: string;
 }
 
+interface FifoLine {
+  batch_code: string;
+  production_date: string;
+  boxes_available: number;
+  boxes_to_take: number;
+}
+
 @Component({
   selector: 'app-dispatch',
   standalone: true,
@@ -182,13 +189,6 @@ interface DispatchRow {
     </div>
   `,
 })
-interface FifoLine {
-  batch_code: string;
-  production_date: string;
-  boxes_available: number;
-  boxes_to_take: number;
-}
-
 export class DispatchComponent implements OnInit {
   private readonly supabase = inject(SupabaseService);
 
