@@ -363,10 +363,9 @@ export class KanbanComponent implements OnInit, OnDestroy {
         .limit(150),
       this.supabase.client
         .from('dispatch_events')
-        .select('id, batch_code, sku_id, boxes_dispatched, customer_name, invoice_number, dispatch_date, worker_id, created_at, sku:gg_flavors(id,name,code)')
+        .select('id, batch_code, flavor_id, boxes_dispatched, units_dispatched, customer_name, invoice_number, dispatch_date, worker_id, is_dispatched, flavor:gg_flavors!dispatch_events_flavor_id_fkey(id,name,code)')
         .eq('is_dispatched', true)
         .order('dispatch_date', { ascending: false })
-        .order('created_at', { ascending: false })
         .limit(150),
     ]);
 
@@ -463,11 +462,11 @@ export class KanbanComponent implements OnInit, OnDestroy {
   }
 
   private mapDispatch(row: any): KanbanItem {
-    const sku = this.firstRelation<any>(row.sku);
-    const title = row.customer_name?.trim() || sku?.name || row.sku_id;
+    const flavor = this.firstRelation<any>(row.flavor);
+    const title = row.customer_name?.trim() || flavor?.name || row.flavor_id;
     const subtitleParts = [
       row.invoice_number ? `Invoice ${row.invoice_number}` : '',
-      sku?.name ? `SKU ${sku.name}` : '',
+      flavor?.name ? `Flavor ${flavor.name}` : '',
       row.dispatch_date ? `Dispatch ${row.dispatch_date}` : '',
     ].filter(Boolean);
 
@@ -475,9 +474,9 @@ export class KanbanComponent implements OnInit, OnDestroy {
       id: `dispatch-${row.id}`,
       module: 'dispatch',
       batchCode: row.batch_code,
-      referenceLabel: row.batch_code,
+      referenceLabel: row.batch_code ?? row.invoice_number ?? row.id,
       workerId: row.worker_id ?? null,
-      createdAt: row.created_at,
+      createdAt: row.dispatch_date ?? new Date().toISOString(),
       eventDate: row.dispatch_date,
       title,
       subtitle: subtitleParts.join(' · '),
