@@ -163,11 +163,10 @@ export class InventoryComponent implements OnInit {
   async loadData(): Promise<void> {
     this.loading.set(true);
 
-    // ── 1. Fetch all packing sessions ───────────────────────────────
+    // ── 1. Fetch pre-aggregated inventory from view ──────────────────
     const { data: sessions } = await this.supabase.client
-      .from('packing_sessions')
-      .select('batch_code, session_date, boxes_packed, flavor_id, flavor:gg_flavors!packing_sessions_flavor_id_fkey(id, name)')
-      .order('session_date', { ascending: false });
+      .from('inventory_by_flavor')
+      .select('*');
 
     // ── 2. Fetch packed invoices and sum boxes per flavor ────────────
     const { data: invoices } = await this.supabase.client
@@ -188,17 +187,16 @@ export class InventoryComponent implements OnInit {
       }
     }
 
-    console.log('[Inventory] raw packing_sessions:', sessions);
+    console.log('[Inventory] raw inventory_by_flavor:', sessions);
     console.log('[Inventory] raw packed invoices:', invoices);
     console.log('[Inventory] dispatchedMap:', Object.fromEntries(dispatchedMap));
 
-    // ── 3. Group packing sessions by flavor, then by batch_code ────────
+    // ── 3. Group view rows by flavor_id ─────────────────────────────
     const groupMap = new Map<string, FlavorGroup>();
     for (const row of (sessions ?? []) as any[]) {
-      const flavor = Array.isArray(row.flavor) ? row.flavor[0] : row.flavor;
-      const flavorId: string = flavor?.id ?? row.flavor_id ?? 'unknown';
-      const flavorName: string = flavor?.name ?? 'Unknown';
-      const boxesPacked: number = Number(row.boxes_packed) || 0;
+      const flavorId: string = row.flavor_id ?? 'unknown';
+      const flavorName: string = row.flavor_name ?? 'Unknown';
+      const boxesPacked: number = Number(row.total_boxes_packed) || 0;
       const batchCode: string = row.batch_code ?? '—';
 
       if (!groupMap.has(flavorId)) {
@@ -213,14 +211,7 @@ export class InventoryComponent implements OnInit {
       }
       const group = groupMap.get(flavorId)!;
       group.totalPacked += boxesPacked;
-
-      // Aggregate into existing batch row or create a new one
-      const existing = group.batches.find(b => b.batchCode === batchCode);
-      if (existing) {
-        existing.boxesPacked += boxesPacked;
-      } else {
-        group.batches.push({ batchCode, boxesPacked });
-      }
+      group.batches.push({ batchCode, boxesPacked });
     }
 
     // ── 4. Apply dispatched totals and compute net ───────────────────
