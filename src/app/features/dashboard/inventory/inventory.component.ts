@@ -5,6 +5,7 @@ import { SupabaseService } from '../../../core/supabase.service';
 interface BatchDetail {
   batchCode: string;
   boxesPacked: number;
+  netStock: number;
 }
 
 interface FlavorGroup {
@@ -100,14 +101,17 @@ interface FlavorGroup {
                           <thead>
                             <tr style="border-bottom:1px solid #E5E7EB;">
                               <th style="text-align:left;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Batch Code</th>
-                              <th style="text-align:right;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Total Boxes Packed</th>
+                              <th style="text-align:right;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Net Stock</th>
                             </tr>
                           </thead>
                           <tbody>
                             @for (b of fg.batches; track b.batchCode) {
                               <tr style="border-bottom:1px solid #f3f4f6;">
                                 <td style="padding:8px 12px;font-size:12px;font-weight:600;color:#374151;font-family:monospace;">{{ b.batchCode }}</td>
-                                <td style="padding:8px 12px;text-align:right;font-size:12px;font-weight:600;color:#374151;">{{ b.boxesPacked | number:'1.0-0' }}</td>
+                                <td style="padding:8px 12px;text-align:right;font-size:12px;font-weight:600;"
+                                    [style.color]="b.netStock > 0 ? '#01AC51' : b.netStock === 0 ? '#6B7280' : '#dc2626'">
+                                  {{ b.netStock | number:'1.0-0' }}
+                                </td>
                               </tr>
                             }
                           </tbody>
@@ -187,11 +191,29 @@ export class InventoryComponent implements OnInit {
       }
     }
 
+    // ── 3. Fetch dispatch_events to get dispatched boxes per batch_code ──
+    const { data: dispatchEvents } = await this.supabase.client
+      .from('dispatch_events')
+      .select('flavor_id, batch_code, boxes_dispatched');
+
+    // Build per-batch dispatched map: "flavorId|batchCode" → total dispatched
+    const batchDispatchedMap = new Map<string, number>();
+    for (const de of (dispatchEvents ?? []) as any[]) {
+      const fid: string = de.flavor_id ?? '';
+      const bc: string = de.batch_code ?? '';
+      const qty: number = Number(de.boxes_dispatched) || 0;
+      if (fid && bc && qty > 0) {
+        const key = `${fid}|${bc}`;
+        batchDispatchedMap.set(key, (batchDispatchedMap.get(key) ?? 0) + qty);
+      }
+    }
+
     console.log('[Inventory] raw inventory_by_flavor:', sessions);
     console.log('[Inventory] raw packed invoices:', invoices);
     console.log('[Inventory] dispatchedMap:', Object.fromEntries(dispatchedMap));
+    console.log('[Inventory] batchDispatchedMap:', Object.fromEntries(batchDispatchedMap));
 
-    // ── 3. Group view rows by flavor_id ─────────────────────────────
+    // ── 4. Group view rows by flavor_id ─────────────────────────────
     const groupMap = new Map<string, FlavorGroup>();
     for (const row of (sessions ?? []) as any[]) {
       const flavorId: string = row.flavor_id ?? 'unknown';
@@ -211,16 +233,19 @@ export class InventoryComponent implements OnInit {
       }
       const group = groupMap.get(flavorId)!;
       group.totalPacked += boxesPacked;
-      group.batches.push({ batchCode, boxesPacked });
+
+      const batchDispatched = batchDispatchedMap.get(`${flavorId}|${batchCode}`) ?? 0;
+      const batchNetStock = Math.max(0, boxesPacked - batchDispatched);
+      group.batches.push({ batchCode, boxesPacked, netStock: batchNetStock });
     }
 
-    // ── 4. Apply dispatched totals and compute net ───────────────────
+    // ── 5. Apply dispatched totals and compute flavor-level net ─────
     for (const group of groupMap.values()) {
       group.totalDispatched = dispatchedMap.get(group.flavorId) ?? 0;
       group.netStock = group.totalPacked - group.totalDispatched;
     }
 
-    // ── 5. Sort by flavor name ───────────────────────────────────────
+    // ── 6. Sort by flavor name ───────────────────────────────────────
     const sorted = Array.from(groupMap.values()).sort((a, b) =>
       a.flavorName.localeCompare(b.flavorName)
     );
