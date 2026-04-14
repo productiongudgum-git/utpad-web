@@ -2,9 +2,8 @@ import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule, DecimalPipe } from '@angular/common';
 import { SupabaseService } from '../../../core/supabase.service';
 
-interface SessionDetail {
+interface BatchDetail {
   batchCode: string;
-  sessionDate: string;
   boxesPacked: number;
 }
 
@@ -14,7 +13,7 @@ interface FlavorGroup {
   totalPacked: number;
   totalDispatched: number;
   netStock: number;
-  sessions: SessionDetail[];
+  batches: BatchDetail[];
 }
 
 @Component({
@@ -96,21 +95,19 @@ interface FlavorGroup {
                   <tr>
                     <td colspan="5" style="padding:0;background:#f8f9fa;border-bottom:1px solid #E5E7EB;">
                       <div style="padding:0 16px 12px 60px;">
-                        <p style="font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.5px;margin:10px 0 6px;">Packing Sessions</p>
+                        <p style="font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.5px;margin:10px 0 6px;">Batches</p>
                         <table style="width:100%;border-collapse:collapse;margin-top:4px;">
                           <thead>
                             <tr style="border-bottom:1px solid #E5E7EB;">
                               <th style="text-align:left;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Batch Code</th>
-                              <th style="text-align:left;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Session Date</th>
-                              <th style="text-align:right;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Boxes Packed</th>
+                              <th style="text-align:right;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Total Boxes Packed</th>
                             </tr>
                           </thead>
                           <tbody>
-                            @for (s of fg.sessions; track s.batchCode + s.sessionDate) {
+                            @for (b of fg.batches; track b.batchCode) {
                               <tr style="border-bottom:1px solid #f3f4f6;">
-                                <td style="padding:8px 12px;font-size:12px;font-weight:600;color:#374151;font-family:monospace;">{{ s.batchCode }}</td>
-                                <td style="padding:8px 12px;font-size:12px;color:#6B7280;">{{ s.sessionDate }}</td>
-                                <td style="padding:8px 12px;text-align:right;font-size:12px;font-weight:600;color:#374151;">{{ s.boxesPacked | number:'1.0-0' }}</td>
+                                <td style="padding:8px 12px;font-size:12px;font-weight:600;color:#374151;font-family:monospace;">{{ b.batchCode }}</td>
+                                <td style="padding:8px 12px;text-align:right;font-size:12px;font-weight:600;color:#374151;">{{ b.boxesPacked | number:'1.0-0' }}</td>
                               </tr>
                             }
                           </tbody>
@@ -191,13 +188,14 @@ export class InventoryComponent implements OnInit {
       }
     }
 
-    // ── 3. Group packing sessions by flavor ──────────────────────────
+    // ── 3. Group packing sessions by flavor, then by batch_code ────────
     const groupMap = new Map<string, FlavorGroup>();
     for (const row of (sessions ?? []) as any[]) {
       const flavor = Array.isArray(row.flavor) ? row.flavor[0] : row.flavor;
       const flavorId: string = flavor?.id ?? row.flavor_id ?? 'unknown';
       const flavorName: string = flavor?.name ?? 'Unknown';
       const boxesPacked: number = Number(row.boxes_packed) || 0;
+      const batchCode: string = row.batch_code ?? '—';
 
       if (!groupMap.has(flavorId)) {
         groupMap.set(flavorId, {
@@ -206,16 +204,19 @@ export class InventoryComponent implements OnInit {
           totalPacked: 0,
           totalDispatched: 0,
           netStock: 0,
-          sessions: [],
+          batches: [],
         });
       }
       const group = groupMap.get(flavorId)!;
       group.totalPacked += boxesPacked;
-      group.sessions.push({
-        batchCode: row.batch_code ?? '—',
-        sessionDate: row.session_date ?? '—',
-        boxesPacked,
-      });
+
+      // Aggregate into existing batch row or create a new one
+      const existing = group.batches.find(b => b.batchCode === batchCode);
+      if (existing) {
+        existing.boxesPacked += boxesPacked;
+      } else {
+        group.batches.push({ batchCode, boxesPacked });
+      }
     }
 
     // ── 4. Apply dispatched totals and compute net ───────────────────
