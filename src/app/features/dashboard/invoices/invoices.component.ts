@@ -64,6 +64,26 @@ interface InvoiceRow {
         </button>
       </div>
 
+      <!-- Filters -->
+      <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;align-items:center;">
+        <div style="position:relative;flex:1;min-width:200px;max-width:300px;">
+          <span class="material-icons-round" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:16px;color:#9CA3AF;pointer-events:none;">search</span>
+          <input [ngModel]="customerFilter()" (ngModelChange)="customerFilter.set($event)"
+                 placeholder="Search customer…"
+                 style="width:100%;padding:8px 12px 8px 32px;border:1px solid #E5E7EB;border-radius:8px;font-size:14px;color:#374151;outline:none;background:#fff;box-sizing:border-box;">
+        </div>
+        <select [ngModel]="statusFilter()" (ngModelChange)="statusFilter.set($event)"
+                style="padding:8px 32px 8px 12px;border:1px solid #E5E7EB;border-radius:8px;font-size:14px;color:#374151;background:#fff url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22%236B7280%22><path d=%22M7 10l5 5 5-5z%22/></svg>') no-repeat right 8px center/18px;appearance:none;outline:none;cursor:pointer;">
+          <option value="all">All Statuses</option>
+          <option value="Pending">Pending</option>
+          <option value="Packed">Packed</option>
+          <option value="Dispatched">Dispatched</option>
+        </select>
+        @if (customerFilter() || statusFilter() !== 'all') {
+          <span style="font-size:13px;color:#6B7280;">{{ filteredInvoices().length }} result{{ filteredInvoices().length === 1 ? '' : 's' }}</span>
+        }
+      </div>
+
       <!-- Create Invoice Form -->
       @if (showForm()) {
         <div style="background:#fff;border-radius:14px;border:1px solid #E5E7EB;padding:24px;margin-bottom:24px;animation:slideDown 0.15s ease;">
@@ -187,11 +207,15 @@ interface InvoiceRow {
             <div class="gg-skeleton" style="height:72px;border-radius:12px;"></div>
           }
         </div>
-      } @else if (invoices().length === 0) {
+      } @else if (filteredInvoices().length === 0) {
         <div style="text-align:center;padding:72px 0;color:#9CA3AF;">
           <span class="material-icons-round" style="font-size:52px;display:block;margin-bottom:14px;">description</span>
-          <p style="font-size:15px;font-weight:600;margin:0 0 6px;color:#374151;">No invoices yet</p>
-          <p style="font-size:13px;margin:0;">Create your first invoice using the button above.</p>
+          <p style="font-size:15px;font-weight:600;margin:0 0 6px;color:#374151;">
+            {{ invoices().length === 0 ? 'No invoices yet' : 'No invoices match your filter' }}
+          </p>
+          <p style="font-size:13px;margin:0;">
+            {{ invoices().length === 0 ? 'Create your first invoice using the button above.' : 'Try adjusting your search or status filter.' }}
+          </p>
         </div>
       } @else {
         <div style="background:#fff;border-radius:12px;border:1px solid #E5E7EB;overflow:hidden;">
@@ -203,11 +227,10 @@ interface InvoiceRow {
                 <th style="text-align:left;padding:12px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Items</th>
                 <th style="text-align:left;padding:12px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Dispatch Date</th>
                 <th style="text-align:center;padding:12px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Status</th>
-                <th style="text-align:left;padding:12px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Created</th>
               </tr>
             </thead>
             <tbody>
-              @for (inv of invoices(); track inv.id) {
+              @for (inv of filteredInvoices(); track inv.id) {
                 <tr style="border-bottom:1px solid #f3f4f6;"
                     [style.background]="inv.is_dispatched ? '#f0fdf4' : inv.is_packed ? '#eff6ff' : 'transparent'">
                   <td style="padding:14px 16px;">
@@ -232,9 +255,6 @@ interface InvoiceRow {
                     } @else {
                       <span style="padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700;background:#fef3c7;color:#b45309;">Pending</span>
                     }
-                  </td>
-                  <td style="padding:14px 16px;font-size:12px;color:#9CA3AF;white-space:nowrap;">
-                    {{ inv.created_at | date:'dd MMM yyyy' }}
                   </td>
                 </tr>
               }
@@ -268,9 +288,24 @@ export class InvoicesComponent implements OnInit {
   customerHint      = signal('');
   customerIsNew     = signal(false);
 
+  // Filters
+  customerFilter = signal('');
+  statusFilter   = signal('all');
+
   readonly totalBoxes = computed(() =>
     this.itemLines().reduce((s, l) => s + (Number(l.quantity_boxes) || 0), 0)
   );
+
+  readonly filteredInvoices = computed(() => {
+    let list = this.invoices();
+    const cq = this.customerFilter().trim().toLowerCase();
+    const sf = this.statusFilter();
+    if (cq) list = list.filter(inv => inv.customer_name.toLowerCase().includes(cq));
+    if (sf === 'Pending')    list = list.filter(inv => !inv.is_packed && !inv.is_dispatched);
+    if (sf === 'Packed')     list = list.filter(inv => inv.is_packed && !inv.is_dispatched);
+    if (sf === 'Dispatched') list = list.filter(inv => inv.is_dispatched);
+    return list;
+  });
 
   form = this.fb.nonNullable.group({
     invoice_number:        ['', Validators.required],

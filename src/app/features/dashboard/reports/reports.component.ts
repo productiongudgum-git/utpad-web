@@ -1,197 +1,253 @@
-import { Component, inject, signal, computed } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
-import { ReportsService } from './reports.service';
-import { ReportType } from '../../../shared/models/manufacturing.models';
+import { SupabaseService } from '../../../core/supabase.service';
+
+interface ReportButton {
+  key: string;
+  label: string;
+  description: string;
+  icon: string;
+  color: string;
+  bgColor: string;
+}
 
 @Component({
   selector: 'app-reports',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule],
   template: `
-    <div class="p-6">
-      <div class="mb-6">
-        <h2 class="text-2xl font-bold text-gray-900">Reports</h2>
-        <p class="text-sm text-gray-500 mt-1">Export operational data as CSV for analysis.</p>
+    <!-- Toast -->
+    @if (toast()) {
+      <div style="position:fixed;bottom:24px;right:24px;z-index:9999;padding:12px 18px;border-radius:10px;background:#1a1a1a;color:#fff;font-size:14px;font-weight:500;display:flex;align-items:center;gap:8px;box-shadow:0 4px 20px rgba(0,0,0,0.25);animation:slideUp 0.2s ease;">
+        <span class="material-icons-round" style="font-size:16px;">check_circle</span>
+        {{ toast() }}
+      </div>
+    }
+
+    <div style="padding:28px 24px;max-width:900px;">
+
+      <div style="margin-bottom:28px;">
+        <h1 class="font-display" style="font-size:26px;font-weight:700;color:var(--foreground);margin:0 0 4px;">Reports</h1>
+        <p style="font-size:14px;color:var(--muted-fg);margin:0;">Download operational reports as CSV files directly to your browser.</p>
       </div>
 
-      <!-- Controls -->
-      <div class="bg-white rounded-xl border border-gray-200 p-5 mb-6">
-        <div class="grid grid-cols-1 sm:grid-cols-4 gap-4 items-end">
-
-          <!-- Report type -->
-          <div class="sm:col-span-1">
-            <label class="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-1.5">Report Type</label>
-            <select
-              [(ngModel)]="selectedType"
-              class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition">
-              @for (opt of reportTypeOptions; track opt.value) {
-                <option [value]="opt.value">{{ opt.label }}</option>
-              }
-            </select>
-          </div>
-
-          <!-- From date -->
-          <div>
-            <label class="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-1.5">From</label>
-            <input
-              type="date"
-              [(ngModel)]="fromDate"
-              class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition" />
-          </div>
-
-          <!-- To date -->
-          <div>
-            <label class="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-1.5">To</label>
-            <input
-              type="date"
-              [(ngModel)]="toDate"
-              class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition" />
-          </div>
-
-          <!-- Actions -->
-          <div class="flex gap-2">
-            <button
-              (click)="loadPreview()"
-              [disabled]="loading()"
-              class="flex-1 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 font-semibold text-sm px-4 py-2.5 hover:bg-blue-100 transition disabled:opacity-50 disabled:cursor-not-allowed">
-              Preview
-            </button>
-            <button
-              (click)="downloadCsv()"
-              [disabled]="loading() || rows().length === 0"
-              class="flex-1 rounded-lg bg-gray-900 text-white font-semibold text-sm px-4 py-2.5 hover:bg-gray-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-              Download CSV
+      <div class="reports-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:20px;">
+        @for (r of reports; track r.key) {
+          <div class="beautiful-card" style="padding:24px;display:flex;flex-direction:column;gap:16px;">
+            <div style="display:flex;align-items:flex-start;gap:14px;">
+              <div style="width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;"
+                   [style.background]="r.bgColor">
+                <span class="material-icons-round" style="font-size:24px;" [style.color]="r.color">{{ r.icon }}</span>
+              </div>
+              <div style="flex:1;min-width:0;">
+                <h3 style="font-size:15px;font-weight:700;color:var(--foreground);margin:0 0 4px;">{{ r.label }}</h3>
+                <p style="font-size:13px;color:var(--muted-fg);margin:0;line-height:1.4;">{{ r.description }}</p>
+              </div>
+            </div>
+            <button (click)="download(r.key)" [disabled]="downloading() === r.key"
+                    style="display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 20px;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:opacity 0.15s;color:#fff;"
+                    [style.background]="r.color"
+                    [style.opacity]="downloading() === r.key ? '0.7' : '1'">
+              <span class="material-icons-round" style="font-size:18px;">
+                {{ downloading() === r.key ? 'hourglass_empty' : 'download' }}
+              </span>
+              {{ downloading() === r.key ? 'Preparing…' : r.label }}
             </button>
           </div>
-        </div>
-
-        @if (errorMessage()) {
-          <p class="mt-3 text-xs text-red-600">{{ errorMessage() }}</p>
         }
       </div>
-
-      <!-- Preview table -->
-      @if (loading()) {
-        <div class="text-center py-8 text-gray-500">Loading report...</div>
-      } @else if (rows().length > 0) {
-        <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div class="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-            <p class="text-sm font-semibold text-gray-700">
-              Preview — first {{ previewRows().length }} of {{ rows().length }} rows
-            </p>
-            <span class="text-xs text-gray-400">{{ selectedTypeLabel }}</span>
-          </div>
-          <div class="overflow-x-auto">
-            <table class="min-w-full text-xs">
-              <thead class="bg-gray-50">
-                <tr>
-                  @for (col of columns(); track col) {
-                    <th class="px-4 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
-                      {{ col }}
-                    </th>
-                  }
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-100">
-                @for (row of previewRows(); track $index) {
-                  <tr class="hover:bg-gray-50">
-                    @for (col of columns(); track col) {
-                      <td class="px-4 py-2.5 text-gray-700 whitespace-nowrap">
-                        {{ row[col] ?? '—' }}
-                      </td>
-                    }
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-        </div>
-      } @else if (hasSearched()) {
-        <div class="text-center py-8 text-gray-400">
-          No data found for the selected period.
-        </div>
-      }
     </div>
+
+    <style>
+      @keyframes slideUp { from { transform:translateY(16px); opacity:0; } to { transform:translateY(0); opacity:1; } }
+      @media (max-width: 700px) { .reports-grid { grid-template-columns: 1fr !important; } }
+    </style>
   `,
 })
 export class ReportsComponent {
-  private reportsService = inject(ReportsService);
+  private readonly supabase = inject(SupabaseService);
 
-  selectedType: ReportType = 'production';
-  fromDate = this.defaultFromDate();
-  toDate = this.defaultToDate();
+  downloading = signal('');
+  toast       = signal('');
 
-  readonly loading = signal(false);
-  readonly rows = signal<Record<string, unknown>[]>([]);
-  readonly errorMessage = signal('');
-  readonly hasSearched = signal(false);
-
-  readonly reportTypeOptions: { value: ReportType; label: string }[] = [
-    { value: 'production', label: 'Production' },
-    { value: 'packing',    label: 'Packing' },
-    { value: 'dispatch',   label: 'Dispatch' },
-    { value: 'inventory',  label: 'Inventory Snapshot' },
-    { value: 'returns',    label: 'Returns' },
+  readonly reports: ReportButton[] = [
+    {
+      key:         'sales',
+      label:       'Download Sales Report',
+      description: 'Dispatch events with customer name, flavor, boxes dispatched, and dispatch date.',
+      icon:        'receipt_long',
+      color:       '#2563eb',
+      bgColor:     '#dbeafe',
+    },
+    {
+      key:         'wastage',
+      label:       'Download Wastage Report',
+      description: 'Production batches showing flavor, planned yield vs actual yield (kg).',
+      icon:        'delete_sweep',
+      color:       '#dc2626',
+      bgColor:     '#fee2e2',
+    },
+    {
+      key:         'dispatches',
+      label:       'Download Dispatches Report',
+      description: 'Full log of all dispatch events including invoice numbers and dates.',
+      icon:        'local_shipping',
+      color:       '#7c3aed',
+      bgColor:     '#f3e8ff',
+    },
+    {
+      key:         'warnings',
+      label:       'Download Warnings Report',
+      description: 'Ingredients currently below their reorder threshold.',
+      icon:        'warning',
+      color:       '#d97706',
+      bgColor:     '#fef3c7',
+    },
   ];
 
-  readonly columns = computed(() => {
-    const r = this.rows();
-    if (r.length === 0) return [];
-    return Object.keys(r[0]);
-  });
-
-  readonly previewRows = computed(() => this.rows().slice(0, 10));
-
-  get selectedTypeLabel(): string {
-    return this.reportTypeOptions.find(o => o.value === this.selectedType)?.label ?? '';
-  }
-
-  async loadPreview(): Promise<void> {
-    this.loading.set(true);
-    this.errorMessage.set('');
-    this.hasSearched.set(true);
+  async download(key: string): Promise<void> {
+    this.downloading.set(key);
     try {
-      const data = await this.fetchRows();
-      this.rows.set(data);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.errorMessage.set(`Failed to load report: ${msg}`);
-      this.rows.set([]);
+      switch (key) {
+        case 'sales':      await this.downloadSales();      break;
+        case 'wastage':    await this.downloadWastage();    break;
+        case 'dispatches': await this.downloadDispatches(); break;
+        case 'warnings':   await this.downloadWarnings();   break;
+      }
+      this.showToast('Report downloaded successfully');
+    } catch {
+      this.showToast('Failed to generate report');
     } finally {
-      this.loading.set(false);
+      this.downloading.set('');
     }
   }
 
-  async downloadCsv(): Promise<void> {
-    if (this.rows().length === 0) {
-      await this.loadPreview();
+  private async downloadSales(): Promise<void> {
+    const { data } = await this.supabase.client
+      .from('dispatch_events')
+      .select('customer_name, batch_code, boxes_dispatched, dispatch_date, invoice_number, sku:gg_flavors(name)')
+      .order('dispatch_date', { ascending: false });
+
+    const rows = (data ?? []).map((r: any) => {
+      const flavor = Array.isArray(r.sku) ? r.sku[0] : r.sku;
+      return [
+        this.esc(r.customer_name ?? ''),
+        this.esc(flavor?.name ?? ''),
+        r.boxes_dispatched ?? 0,
+        this.esc(r.dispatch_date ?? ''),
+        this.esc(r.invoice_number ?? ''),
+        this.esc(r.batch_code ?? ''),
+      ];
+    });
+
+    this.triggerCsv(
+      ['Customer', 'Flavor', 'Boxes Dispatched', 'Dispatch Date', 'Invoice Number', 'Batch Code'],
+      rows,
+      'sales-report.csv',
+    );
+  }
+
+  private async downloadWastage(): Promise<void> {
+    const { data } = await this.supabase.client
+      .from('production_batches')
+      .select('batch_code, production_date, planned_yield, actual_yield, flavor:gg_flavors!production_batches_flavor_id_fkey(name)')
+      .order('production_date', { ascending: false });
+
+    const rows = (data ?? []).map((r: any) => {
+      const flavor = Array.isArray(r.flavor) ? r.flavor[0] : r.flavor;
+      const planned = r.planned_yield ?? 0;
+      const actual  = r.actual_yield ?? 0;
+      const wastage = Math.max(0, planned - actual);
+      return [
+        this.esc(r.batch_code ?? ''),
+        this.esc(flavor?.name ?? ''),
+        this.esc(r.production_date ?? ''),
+        planned,
+        actual,
+        wastage,
+      ];
+    });
+
+    this.triggerCsv(
+      ['Batch Code', 'Flavor', 'Production Date', 'Planned Yield (kg)', 'Actual Yield (kg)', 'Wastage (kg)'],
+      rows,
+      'wastage-report.csv',
+    );
+  }
+
+  private async downloadDispatches(): Promise<void> {
+    const { data } = await this.supabase.client
+      .from('dispatch_events')
+      .select('id, batch_code, customer_name, invoice_number, boxes_dispatched, dispatch_date, created_at')
+      .order('dispatch_date', { ascending: false });
+
+    const rows = (data ?? []).map((r: any) => [
+      this.esc(r.id ?? ''),
+      this.esc(r.batch_code ?? ''),
+      this.esc(r.customer_name ?? ''),
+      this.esc(r.invoice_number ?? ''),
+      r.boxes_dispatched ?? 0,
+      this.esc(r.dispatch_date ?? ''),
+      this.esc(r.created_at ?? ''),
+    ]);
+
+    this.triggerCsv(
+      ['ID', 'Batch Code', 'Customer', 'Invoice Number', 'Boxes Dispatched', 'Dispatch Date', 'Created At'],
+      rows,
+      'dispatches-report.csv',
+    );
+  }
+
+  private async downloadWarnings(): Promise<void> {
+    const { data: inv } = await this.supabase.client
+      .from('inventory_raw_materials')
+      .select('ingredient_id, current_qty, unit, low_stock_threshold, ingredient:gg_ingredients(name)');
+
+    const low = (inv ?? []).filter((r: any) =>
+      (r.low_stock_threshold ?? 0) > 0 && (r.current_qty ?? 0) <= (r.low_stock_threshold ?? 0)
+    );
+
+    const rows = low.map((r: any) => {
+      const ingredient = Array.isArray(r.ingredient) ? r.ingredient[0] : r.ingredient;
+      return [
+        this.esc(ingredient?.name ?? r.ingredient_id),
+        r.current_qty ?? 0,
+        this.esc(r.unit ?? ''),
+        r.low_stock_threshold ?? 0,
+        Math.max(0, (r.low_stock_threshold ?? 0) - (r.current_qty ?? 0)),
+      ];
+    });
+
+    this.triggerCsv(
+      ['Ingredient', 'Current Quantity', 'Unit', 'Reorder Point', 'Deficit'],
+      rows,
+      'warnings-report.csv',
+    );
+  }
+
+  private triggerCsv(headers: string[], rows: (string | number)[][], filename: string): void {
+    const lines = [
+      headers.join(','),
+      ...rows.map(r => r.join(',')),
+    ];
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  private esc(val: string): string {
+    if (val.includes(',') || val.includes('"') || val.includes('\n')) {
+      return `"${val.replace(/"/g, '""')}"`;
     }
-    await this.reportsService.downloadReport(this.selectedType, this.fromDate, this.toDate);
+    return val;
   }
 
-  private async fetchRows(): Promise<Record<string, unknown>[]> {
-    switch (this.selectedType) {
-      case 'production':
-        return (await this.reportsService.fetchProduction(this.fromDate, this.toDate)) as unknown as Record<string, unknown>[];
-      case 'packing':
-        return (await this.reportsService.fetchPacking(this.fromDate, this.toDate)) as unknown as Record<string, unknown>[];
-      case 'dispatch':
-        return (await this.reportsService.fetchDispatch(this.fromDate, this.toDate)) as unknown as Record<string, unknown>[];
-      case 'inventory':
-        return (await this.reportsService.fetchInventorySnapshot()) as unknown as Record<string, unknown>[];
-      case 'returns':
-        return (await this.reportsService.fetchReturns(this.fromDate, this.toDate)) as unknown as Record<string, unknown>[];
-    }
-  }
-
-  private defaultFromDate(): string {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return d.toISOString().slice(0, 10);
-  }
-
-  private defaultToDate(): string {
-    return new Date().toISOString().slice(0, 10);
+  private showToast(msg: string): void {
+    this.toast.set(msg);
+    setTimeout(() => this.toast.set(''), 3000);
   }
 }

@@ -238,7 +238,7 @@ export class KanbanComponent implements OnInit, OnDestroy {
   readonly loading = signal(false);
   readonly items = signal<KanbanItem[]>([]);
   readonly searchTerm = signal('');
-  readonly filterByToday = signal(false);
+  readonly filterByToday = signal(true);
   readonly selectedBatchFilter = signal(ALL_BATCHES_OPTION);
 
   readonly columns: KanbanColumn[] = [
@@ -275,14 +275,14 @@ export class KanbanComponent implements OnInit, OnDestroy {
   readonly filteredItems = computed(() => {
     const query = this.searchTerm().trim().toLowerCase();
     const selectedBatch = this.selectedBatchFilter();
-    const todayBatch = this.filterByToday() ? this.batchCodeSvc.batchCode() : '';
+    const today = new Date().toISOString().substring(0, 10);
 
     return this.items().filter((item) => {
       if (selectedBatch !== ALL_BATCHES_OPTION && item.batchCode !== selectedBatch) {
         return false;
       }
 
-      if (todayBatch && item.batchCode !== todayBatch) {
+      if (this.filterByToday() && item.eventDate !== today) {
         return false;
       }
 
@@ -364,6 +364,7 @@ export class KanbanComponent implements OnInit, OnDestroy {
       this.supabase.client
         .from('dispatch_events')
         .select('id, batch_code, sku_id, boxes_dispatched, customer_name, invoice_number, dispatch_date, worker_id, created_at, sku:gg_flavors(id,name,code)')
+        .eq('is_dispatched', true)
         .order('dispatch_date', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(150),

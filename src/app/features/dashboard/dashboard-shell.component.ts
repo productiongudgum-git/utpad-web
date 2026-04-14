@@ -116,22 +116,13 @@ export class DashboardShellComponent {
   navItems: NavItem[] = [
     { label: 'Dashboard',   icon: 'dashboard',              route: 'home' },
     { label: 'Live Kanban', icon: 'view_kanban',             route: 'kanban' },
-    { label: 'Inwarding',   icon: 'input',                  route: 'inwarding' },
-    { label: 'Production',  icon: 'precision_manufacturing', route: 'production' },
-    { label: 'Packing',     icon: 'inventory_2',             route: 'packing' },
     { label: 'Recipes',     icon: 'science',                 route: 'recipes' },
     { label: 'Inventory',   icon: 'inventory_2',             route: 'inventory' },
     { label: 'Ingredients', icon: 'category',                route: 'ingredients' },
-    { label: 'Flavors',     icon: 'local_dining',            route: 'flavors' },
-    { label: 'Vendors',     icon: 'storefront',              route: 'vendors' },
-    { label: 'Customers',   icon: 'people',                  route: 'customers' },
     { label: 'Team',        icon: 'group',                   route: 'team' },
-    { label: 'Access',      icon: 'admin_panel_settings',    route: 'sessions' },
-    { label: 'History',     icon: 'history',                 route: 'history' },
     { label: 'Wastage',     icon: 'delete_sweep',            route: 'wastage' },
-    { label: 'Dispatch',    icon: 'local_shipping',          route: 'dispatch' },
     { label: 'Invoices',    icon: 'description',             route: 'invoices' },
-    { label: 'Bills',       icon: 'receipt_long',            route: 'bills' },
+    { label: 'Reports',     icon: 'download',                route: 'reports' },
   ];
 
   userName = () => this.authService.currentUser()?.name ?? 'Admin User';

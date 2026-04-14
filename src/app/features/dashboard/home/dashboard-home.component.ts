@@ -1,28 +1,13 @@
 import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
-import { CommonModule, DatePipe, DecimalPipe } from '@angular/common';
+import { CommonModule, DecimalPipe } from '@angular/common';
+import { Router } from '@angular/router';
 import { SupabaseService } from '../../../core/supabase.service';
 
 interface KpiData {
   activeBatches: number;
-  totalProductionKg: number;
-  dispatchedKg: number;
+  totalBoxesToday: number;
+  packedBoxesToday: number;
   lowStockCount: number;
-}
-
-interface Activity {
-  type: 'production' | 'packing' | 'dispatch';
-  label: string;
-  detail: string;
-  time: string;
-  created_at: string;
-  icon: string;
-  color: string;
-}
-
-interface TrendDay {
-  date: string;
-  label: string;
-  value: number;
 }
 
 interface PackingWarning {
@@ -31,12 +16,13 @@ interface PackingWarning {
   expectedBoxes: number;
   packedBoxes: number;
   boxesShort: number;
+  kgsPending: number;
 }
 
 @Component({
   selector: 'app-dashboard-home',
   standalone: true,
-  imports: [CommonModule, DatePipe, DecimalPipe],
+  imports: [CommonModule, DecimalPipe],
   template: `
     <div style="padding:28px 24px;max-width:1200px;">
 
@@ -69,34 +55,35 @@ interface PackingWarning {
             </p>
           </div>
 
-          <!-- Total Production -->
+          <!-- Total Production (boxes today) -->
           <div class="beautiful-card" style="padding:20px;position:relative;overflow:hidden;">
             <div style="position:absolute;top:16px;right:16px;width:44px;height:44px;background:#dcfce7;border-radius:12px;display:flex;align-items:center;justify-content:center;">
-              <span class="material-icons-round" style="color:var(--primary);font-size:22px;">scale</span>
+              <span class="material-icons-round" style="color:var(--primary);font-size:22px;">inventory_2</span>
             </div>
             <p style="font-size:12px;color:var(--muted-fg);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin:0 0 8px;">Total Production</p>
-            <p class="font-display" style="font-size:36px;font-weight:700;color:var(--foreground);margin:0 0 6px;">{{ kpi().totalProductionKg | number:'1.0-0' }}<span style="font-size:16px;font-weight:500;color:var(--muted-fg);"> kg</span></p>
+            <p class="font-display" style="font-size:36px;font-weight:700;color:var(--foreground);margin:0 0 6px;">{{ kpi().totalBoxesToday | number:'1.0-0' }}<span style="font-size:16px;font-weight:500;color:var(--muted-fg);"> boxes</span></p>
             <p style="font-size:12px;color:var(--primary);margin:0;display:flex;align-items:center;gap:4px;">
-              <span class="material-icons-round" style="font-size:14px;">trending_up</span>
-              All time
+              <span class="material-icons-round" style="font-size:14px;">today</span>
+              Today only
             </p>
           </div>
 
-          <!-- Dispatched -->
+          <!-- Packed Today -->
           <div class="beautiful-card" style="padding:20px;position:relative;overflow:hidden;">
-            <div style="position:absolute;top:16px;right:16px;width:44px;height:44px;background:#f3e8ff;border-radius:12px;display:flex;align-items:center;justify-content:center;">
-              <span class="material-icons-round" style="color:#7c3aed;font-size:22px;">local_shipping</span>
+            <div style="position:absolute;top:16px;right:16px;width:44px;height:44px;background:#fef3c7;border-radius:12px;display:flex;align-items:center;justify-content:center;">
+              <span class="material-icons-round" style="color:#d97706;font-size:22px;">check_box</span>
             </div>
-            <p style="font-size:12px;color:var(--muted-fg);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin:0 0 8px;">Dispatched</p>
-            <p class="font-display" style="font-size:36px;font-weight:700;color:var(--foreground);margin:0 0 6px;">{{ kpi().dispatchedKg | number:'1.0-0' }}<span style="font-size:16px;font-weight:500;color:var(--muted-fg);"> kg</span></p>
-            <p style="font-size:12px;color:#7c3aed;margin:0;display:flex;align-items:center;gap:4px;">
-              <span class="material-icons-round" style="font-size:14px;">local_shipping</span>
-              Total dispatched
+            <p style="font-size:12px;color:var(--muted-fg);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin:0 0 8px;">Packed Today</p>
+            <p class="font-display" style="font-size:36px;font-weight:700;color:var(--foreground);margin:0 0 6px;">{{ kpi().packedBoxesToday | number:'1.0-0' }}<span style="font-size:16px;font-weight:500;color:var(--muted-fg);"> boxes</span></p>
+            <p style="font-size:12px;color:#d97706;margin:0;display:flex;align-items:center;gap:4px;">
+              <span class="material-icons-round" style="font-size:14px;">today</span>
+              Packing sessions today
             </p>
           </div>
 
           <!-- Low Stock Alerts -->
-          <div class="beautiful-card" style="padding:20px;position:relative;overflow:hidden;">
+          <div class="beautiful-card kpi-clickable" style="padding:20px;position:relative;overflow:hidden;cursor:pointer;"
+               (click)="goToLowStock()">
             <div style="position:absolute;top:16px;right:16px;width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;"
                  [style.background]="kpi().lowStockCount > 0 ? '#fee2e2' : '#dcfce7'">
               <span class="material-icons-round" style="font-size:22px;"
@@ -109,115 +96,70 @@ interface PackingWarning {
             <p style="font-size:12px;margin:0;display:flex;align-items:center;gap:4px;"
                [style.color]="kpi().lowStockCount > 0 ? 'var(--destructive)' : 'var(--primary)'">
               <span class="material-icons-round" style="font-size:14px;">
-                {{ kpi().lowStockCount > 0 ? 'trending_down' : 'check' }}
+                {{ kpi().lowStockCount > 0 ? 'open_in_new' : 'check' }}
               </span>
-              {{ kpi().lowStockCount > 0 ? 'Needs attention' : 'All stocked' }}
+              {{ kpi().lowStockCount > 0 ? 'Click to view' : 'All stocked' }}
             </p>
           </div>
         </div>
       }
 
-      <!-- Pending Packing Warnings -->
+      <!-- Pending Packing Warning Banner -->
       @if (!loading() && packingWarnings().length > 0) {
-        <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:16px 20px;margin-bottom:20px;">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+        <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:16px 20px;margin-bottom:20px;cursor:pointer;"
+             (click)="showPackingModal.set(true)">
+          <div style="display:flex;align-items:center;gap:8px;">
             <span class="material-icons-round" style="color:#d97706;font-size:20px;">warning</span>
-            <h3 style="font-size:14px;font-weight:700;color:#92400e;margin:0;">
+            <h3 style="font-size:14px;font-weight:700;color:#92400e;margin:0;flex:1;">
               Pending Packing — {{ packingWarnings().length }} batch{{ packingWarnings().length > 1 ? 'es' : '' }} not fully packed today
             </h3>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:8px;">
-            @for (w of packingWarnings(); track w.batchCode) {
-              <div style="display:flex;align-items:center;gap:12px;background:#fff;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;flex-wrap:wrap;">
-                <span style="font-family:monospace;font-size:13px;font-weight:700;color:#121212;">{{ w.batchCode }}</span>
-                <span style="font-size:13px;color:#374151;">{{ w.flavorName }}</span>
-                <div style="margin-left:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                  <span style="font-size:12px;color:#6B7280;">
-                    Packed: <strong style="color:#374151;">{{ w.packedBoxes }}</strong> / {{ w.expectedBoxes }} boxes
-                  </span>
-                  <span style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;background:#fee2e2;color:#dc2626;">
-                    {{ w.boxesShort }} boxes short
-                  </span>
-                </div>
-              </div>
-            }
+            <span class="material-icons-round" style="color:#d97706;font-size:18px;">chevron_right</span>
           </div>
         </div>
       }
 
-      <!-- Charts + Activity row -->
-      <div class="chart-grid" style="display:grid;grid-template-columns:1fr 340px;gap:20px;">
-
-        <!-- Production Trend (CSS Bar Chart) -->
-        <div class="beautiful-card" style="padding:24px;">
-          <h3 class="font-display" style="font-size:15px;font-weight:600;color:var(--foreground);margin:0 0 20px;">Production Trend (30 Days)</h3>
-          @if (loading()) {
-            <div class="skeleton" style="height:220px;border-radius:8px;"></div>
-          } @else {
-            <div style="display:flex;flex-direction:column;gap:2px;">
-              <!-- Y-axis max label -->
-              <div style="display:flex;align-items:center;justify-content:flex-end;margin-bottom:4px;">
-                <span style="font-size:11px;color:var(--muted-fg);">Max: {{ maxTrendValue() | number:'1.0-0' }} kg</span>
+      <!-- Packing Modal -->
+      @if (showPackingModal()) {
+        <div style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px;"
+             (click)="showPackingModal.set(false)">
+          <div style="background:#fff;border-radius:16px;width:100%;max-width:560px;box-shadow:0 20px 60px rgba(0,0,0,0.2);overflow:hidden;"
+               (click)="$event.stopPropagation()">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid #E5E7EB;">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span class="material-icons-round" style="color:#d97706;font-size:22px;">warning</span>
+                <h2 style="font-size:16px;font-weight:700;color:#121212;margin:0;">Pending Packing</h2>
               </div>
-
-              <!-- Bar chart container -->
-              <div style="display:flex;align-items:flex-end;gap:2px;height:200px;border-bottom:1px solid var(--border);padding-bottom:4px;">
-                @for (day of trendDays(); track day.date) {
-                  <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative;"
-                       class="bar-wrapper">
-                    <!-- Tooltip on hover -->
-                    <div class="bar-tooltip" style="position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:#1f2937;color:#fff;padding:4px 8px;border-radius:6px;font-size:11px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity 0.15s;z-index:10;margin-bottom:4px;">
-                      {{ day.label }}: {{ day.value | number:'1.1-1' }} kg
-                    </div>
-                    <div style="width:100%;border-radius:3px 3px 0 0;min-height:2px;transition:height 0.3s ease;"
-                         [style.height.%]="maxTrendValue() > 0 ? (day.value / maxTrendValue()) * 100 : 0"
-                         [style.background]="day.value > 0 ? 'rgba(1,172,81,0.75)' : 'rgba(1,172,81,0.15)'">
-                    </div>
-                  </div>
-                }
-              </div>
-
-              <!-- X-axis labels (show every 5th day) -->
-              <div style="display:flex;gap:2px;margin-top:4px;">
-                @for (day of trendDays(); track day.date; let i = $index) {
-                  <div style="flex:1;text-align:center;">
-                    @if (i % 5 === 0 || i === trendDays().length - 1) {
-                      <span style="font-size:9px;color:var(--muted-fg);">{{ day.label }}</span>
-                    }
-                  </div>
-                }
-              </div>
+              <button (click)="showPackingModal.set(false)"
+                      style="border:none;background:none;cursor:pointer;color:#9CA3AF;display:flex;align-items:center;padding:4px;">
+                <span class="material-icons-round" style="font-size:20px;">close</span>
+              </button>
             </div>
-          }
-        </div>
-
-        <!-- Recent Activity -->
-        <div class="beautiful-card" style="padding:24px;">
-          <h3 class="font-display" style="font-size:15px;font-weight:600;color:var(--foreground);margin:0 0 16px;">Recent Activity</h3>
-
-          @if (activities().length === 0 && !loading()) {
-            <div style="text-align:center;padding:32px 0;color:#9CA3AF;font-size:14px;">
-              <span class="material-icons-round" style="font-size:36px;display:block;margin-bottom:8px;">inbox</span>
-              No recent activity
+            <div style="overflow-x:auto;">
+              <table style="width:100%;border-collapse:collapse;">
+                <thead>
+                  <tr style="background:#f8f9fa;border-bottom:1px solid #E5E7EB;">
+                    <th style="text-align:left;padding:10px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Batch Code</th>
+                    <th style="text-align:left;padding:10px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Flavor</th>
+                    <th style="text-align:right;padding:10px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Kgs Pending</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (w of packingWarnings(); track w.batchCode) {
+                    <tr style="border-bottom:1px solid #f3f4f6;">
+                      <td style="padding:12px 16px;font-family:monospace;font-size:13px;font-weight:700;color:#121212;">{{ w.batchCode }}</td>
+                      <td style="padding:12px 16px;font-size:13px;color:#374151;">{{ w.flavorName }}</td>
+                      <td style="padding:12px 16px;text-align:right;">
+                        <span style="font-size:13px;font-weight:700;color:#d97706;">{{ w.kgsPending | number:'1.0-0' }} kg</span>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
             </div>
-          }
-
-          <div style="display:flex;flex-direction:column;gap:12px;">
-            @for (act of activities(); track act.created_at + act.label) {
-              <div style="display:flex;align-items:flex-start;gap:10px;">
-                <div [style.background]="act.color + '22'" style="width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-                  <span class="material-icons-round" [style.color]="act.color" style="font-size:16px;">{{ act.icon }}</span>
-                </div>
-                <div style="flex:1;min-width:0;">
-                  <p style="font-size:13px;font-weight:600;color:var(--foreground);margin:0 0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ act.label }}</p>
-                  <p style="font-size:12px;color:var(--muted-fg);margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ act.detail }}</p>
-                </div>
-                <p style="font-size:11px;color:#9CA3AF;white-space:nowrap;flex-shrink:0;margin:0;padding-top:2px;">{{ act.time }}</p>
-              </div>
-            }
           </div>
         </div>
-      </div>
+      }
+
     </div>
 
     <style>
@@ -230,137 +172,79 @@ interface PackingWarning {
       @media (max-width: 600px) {
         .kpi-grid { grid-template-columns: 1fr; }
       }
-      @media (max-width: 900px) {
-        .chart-grid { grid-template-columns: 1fr !important; }
-      }
-      .bar-wrapper:hover .bar-tooltip {
-        opacity: 1 !important;
+      .kpi-clickable:hover {
+        box-shadow: 0 4px 16px rgba(0,0,0,0.10) !important;
+        transform: translateY(-1px);
+        transition: all 0.15s ease;
       }
     </style>
   `,
 })
 export class DashboardHomeComponent implements OnInit, OnDestroy {
   private readonly supabase = inject(SupabaseService);
+  private readonly router   = inject(Router);
 
   loading = signal(true);
-  kpi = signal<KpiData>({ activeBatches: 0, totalProductionKg: 0, dispatchedKg: 0, lowStockCount: 0 });
-  activities = signal<Activity[]>([]);
-  trendDays = signal<TrendDay[]>([]);
+  kpi = signal<KpiData>({ activeBatches: 0, totalBoxesToday: 0, packedBoxesToday: 0, lowStockCount: 0 });
   packingWarnings = signal<PackingWarning[]>([]);
-
-  maxTrendValue = computed(() => {
-    const days = this.trendDays();
-    if (days.length === 0) return 0;
-    return Math.max(...days.map(d => d.value), 1);
-  });
+  showPackingModal = signal(false);
 
   async ngOnInit(): Promise<void> {
     await this.loadData();
   }
 
-  ngOnDestroy(): void {
-    // No external resources to clean up (CSS chart, no canvas)
+  ngOnDestroy(): void {}
+
+  goToLowStock(): void {
+    this.router.navigate(['/dashboard/ingredients'], { queryParams: { filter: 'low-stock' } });
   }
 
   private async loadData(): Promise<void> {
     this.loading.set(true);
     try {
-      const thirtyDaysAgo = this.daysAgo(30);
-
       const today = new Date().toISOString().substring(0, 10);
 
-      const [batchRes, prodRes, dispRes, stockRes, prodActivityRes, packActivityRes, dispActivityRes, trendRes,
-             todayProdRes, todayPackRes] = await Promise.all([
+      const [batchRes, stockRes, todayProdRes, todayPackRes] = await Promise.all([
         // Active batches (status != 'completed')
-        this.supabase.client.from('production_batches').select('id', { count: 'exact', head: true })
+        this.supabase.client.from('production_batches')
+          .select('id', { count: 'exact', head: true })
           .in('status', ['production', 'packing', 'dispatch', 'open']),
-        // Total production kg (actual_yield in production_batches)
-        this.supabase.client.from('production_batches').select('actual_yield'),
-        // Total dispatched (boxes_dispatched in dispatch_events)
-        this.supabase.client.from('dispatch_events').select('boxes_dispatched'),
-        // Low stock ingredients (join inventory_raw_materials)
-        this.supabase.client.from('inventory_raw_materials').select('ingredient_id, current_qty, low_stock_threshold'),
-        // Recent production activity
-        this.supabase.client.from('production_batches')
-          .select('id, actual_yield, production_date, created_at, batch_code, flavor:gg_flavors!production_batches_flavor_id_fkey(name)')
-          .order('created_at', { ascending: false }).limit(5),
-        // Recent packing activity
-        this.supabase.client.from('packing_sessions')
-          .select('id, boxes_packed, session_date, created_at, batch_code, flavor:gg_flavors!packing_sessions_flavor_id_fkey(name)')
-          .order('created_at', { ascending: false }).limit(5),
-        // Recent dispatch activity
-        this.supabase.client.from('dispatch_events')
-          .select('id, boxes_dispatched, dispatch_date, created_at, batch_code, customer_name')
-          .order('created_at', { ascending: false }).limit(5),
-        // 30-day production trend
-        this.supabase.client.from('production_batches')
-          .select('production_date, actual_yield')
-          .gte('production_date', thirtyDaysAgo)
-          .order('production_date', { ascending: true }),
-        // Today's production (for packing warnings)
+        // Low stock ingredients
+        this.supabase.client.from('inventory_raw_materials')
+          .select('ingredient_id, current_qty, low_stock_threshold'),
+        // Today's production batches (for boxes today + packing warnings)
         this.supabase.client.from('production_batches')
           .select('batch_code, planned_yield, flavor:gg_flavors!production_batches_flavor_id_fkey(name)')
           .eq('production_date', today),
-        // Today's packing records
+        // Today's packing sessions (for packed today + packing warnings)
         this.supabase.client.from('packing_sessions')
           .select('batch_code, boxes_packed')
           .eq('session_date', today),
       ]);
 
-      // KPI calculations
-      const totalProd = (prodRes.data ?? []).reduce((s: number, r: any) => s + (r.actual_yield ?? 0), 0);
-      const totalDisp = (dispRes.data ?? []).reduce((s: number, r: any) => s + (r.boxes_dispatched ?? 0), 0);
-      const lowStock = (stockRes.data ?? []).filter((i: any) => (i.low_stock_threshold ?? 0) > 0 && (i.current_qty ?? 0) <= (i.low_stock_threshold ?? 0)).length;
+      // Total boxes produced today (derived from planned_yield)
+      const todayBatches = todayProdRes.data ?? [];
+      const totalBoxesToday = todayBatches.reduce((sum: number, b: any) => {
+        const planned = b.planned_yield ?? 0;
+        return sum + (planned >= 10000 ? 667 : 500);
+      }, 0);
+
+      // Total packed boxes today
+      const packedBoxesToday = (todayPackRes.data ?? []).reduce(
+        (s: number, r: any) => s + (r.boxes_packed ?? 0), 0
+      );
+
+      // Low stock count
+      const lowStock = (stockRes.data ?? []).filter(
+        (i: any) => (i.low_stock_threshold ?? 0) > 0 && (i.current_qty ?? 0) <= (i.low_stock_threshold ?? 0)
+      ).length;
 
       this.kpi.set({
         activeBatches: batchRes.count ?? 0,
-        totalProductionKg: totalProd,
-        dispatchedKg: totalDisp,
+        totalBoxesToday,
+        packedBoxesToday,
         lowStockCount: lowStock,
       });
-
-      // Build combined activity feed from production, packing, dispatch - sorted by created_at desc, take 5
-      const allActivities: Activity[] = [];
-
-      (prodActivityRes.data ?? []).forEach((r: any) => {
-        allActivities.push({
-          type: 'production',
-          label: `Production logged`,
-          detail: `${r.batch_code ?? 'Batch'} — ${r.actual_yield ?? 0} kg output`,
-          time: this.relTime(r.created_at),
-          created_at: r.created_at,
-          icon: 'precision_manufacturing',
-          color: '#2563eb',
-        });
-      });
-
-      (packActivityRes.data ?? []).forEach((r: any) => {
-        allActivities.push({
-          type: 'packing',
-          label: `Packing completed`,
-          detail: `${r.batch_code ?? 'Batch'} — ${r.boxes_packed ?? 0} boxes`,
-          time: this.relTime(r.created_at),
-          created_at: r.created_at,
-          icon: 'inventory_2',
-          color: '#d97706',
-        });
-      });
-
-      (dispActivityRes.data ?? []).forEach((r: any) => {
-        allActivities.push({
-          type: 'dispatch',
-          label: `Dispatch sent`,
-          detail: `${r.batch_code ?? 'Batch'} — ${r.boxes_dispatched ?? 0} boxes dispatched to ${r.customer_name ?? 'customer'}`,
-          time: this.relTime(r.created_at),
-          created_at: r.created_at,
-          icon: 'local_shipping',
-          color: '#7c3aed',
-        });
-      });
-
-      // Sort by created_at descending and take top 5
-      allActivities.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      this.activities.set(allActivities.slice(0, 5));
 
       // Packing warnings — batches produced today not fully packed
       const packTodayMap = new Map<string, number>();
@@ -368,67 +252,29 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
         const key = p.batch_code ?? '';
         packTodayMap.set(key, (packTodayMap.get(key) ?? 0) + (p.boxes_packed ?? 0));
       });
+
       const warnings: PackingWarning[] = [];
-      for (const prod of (todayProdRes.data ?? [])) {
+      for (const prod of todayBatches) {
         const plannedYield: number = (prod as any).planned_yield ?? 7500;
         const expectedBoxes = plannedYield >= 10000 ? 667 : 500;
         const batchCode: string = (prod as any).batch_code ?? '';
-        const packedBoxes   = packTodayMap.get(batchCode) ?? 0;
-        const boxesShort    = Math.max(0, expectedBoxes - packedBoxes);
+        const packedBoxes = packTodayMap.get(batchCode) ?? 0;
+        const boxesShort = Math.max(0, expectedBoxes - packedBoxes);
         if (boxesShort > 0) {
+          const kgsPending = Math.round(boxesShort * plannedYield / expectedBoxes);
           warnings.push({
             batchCode,
             flavorName:   (prod as any).flavor?.name ?? 'Unknown',
             expectedBoxes,
             packedBoxes,
             boxesShort,
+            kgsPending,
           });
         }
       }
       this.packingWarnings.set(warnings);
-
-      // Build 30-day trend data
-      const byDay: Record<string, number> = {};
-      for (let i = 29; i >= 0; i--) {
-        const d = this.daysAgoDate(i);
-        byDay[d] = 0;
-      }
-      (trendRes.data ?? []).forEach((r: any) => {
-        const d = (r.production_date ?? '').substring(0, 10);
-        if (d in byDay) byDay[d] += r.actual_yield ?? 0;
-      });
-
-      const days: TrendDay[] = Object.entries(byDay).map(([date, value]) => {
-        const dt = new Date(date);
-        return {
-          date,
-          label: `${dt.getDate()}/${dt.getMonth() + 1}`,
-          value,
-        };
-      });
-      this.trendDays.set(days);
     } finally {
       this.loading.set(false);
     }
-  }
-
-  private daysAgo(n: number): string {
-    const d = new Date();
-    d.setDate(d.getDate() - n);
-    return d.toISOString().substring(0, 10);
-  }
-
-  private daysAgoDate(n: number): string {
-    const d = new Date();
-    d.setDate(d.getDate() - n);
-    return d.toISOString().substring(0, 10);
-  }
-
-  private relTime(iso: string): string {
-    const diff = Date.now() - new Date(iso).getTime();
-    if (diff < 60000) return 'just now';
-    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-    return `${Math.floor(diff / 86400000)}d ago`;
   }
 }

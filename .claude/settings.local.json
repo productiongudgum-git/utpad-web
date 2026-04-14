@@ -17,7 +17,9 @@
       "Bash(curl -s 'https://hafaxgyaxmypmmpbemos.supabase.co/rest/v1/gg_recipes?limit=5' -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhhZmF4Z3lheG15cG1tcGJlbW9zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3Mzc4NjEsImV4cCI6MjA4OTMxMzg2MX0.1ldXX5lOVQh-tOrP15HyNhA3aDs5jy1vLZkQEE6VJq4' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhhZmF4Z3lheG15cG1tcGJlbW9zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3Mzc4NjEsImV4cCI6MjA4OTMxMzg2MX0.1ldXX5lOVQh-tOrP15HyNhA3aDs5jy1vLZkQEE6VJq4' -H 'Accept: application/json')",
       "Bash(curl -s 'https://hafaxgyaxmypmmpbemos.supabase.co/rest/v1/inventory_finished_goods?limit=0' -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhhZmF4Z3lheG15cG1tcGJlbW9zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3Mzc4NjEsImV4cCI6MjA4OTMxMzg2MX0.1ldXX5lOVQh-tOrP15HyNhA3aDs5jy1vLZkQEE6VJq4' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhhZmF4Z3lheG15cG1tcGJlbW9zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3Mzc4NjEsImV4cCI6MjA4OTMxMzg2MX0.1ldXX5lOVQh-tOrP15HyNhA3aDs5jy1vLZkQEE6VJq4' -H 'Accept: application/json' -i)",
       "Bash(curl:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(npx tsc:*)",
+      "Bash(node_modules/.bin/tsc --noEmit)"
     ]
   }
 }
