@@ -188,6 +188,10 @@ export class InventoryComponent implements OnInit {
       }
     }
 
+    console.log('[Inventory] raw packing_sessions:', sessions);
+    console.log('[Inventory] raw packed invoices:', invoices);
+    console.log('[Inventory] dispatchedMap:', Object.fromEntries(dispatchedMap));
+
     // ── 3. Group packing sessions by flavor, then by batch_code ────────
     const groupMap = new Map<string, FlavorGroup>();
     for (const row of (sessions ?? []) as any[]) {
@@ -229,6 +233,8 @@ export class InventoryComponent implements OnInit {
     const sorted = Array.from(groupMap.values()).sort((a, b) =>
       a.flavorName.localeCompare(b.flavorName)
     );
+
+    console.log('[Inventory] flavorGroups:', JSON.parse(JSON.stringify(sorted)));
 
     this.flavors.set(sorted);
     this.loading.set(false);
