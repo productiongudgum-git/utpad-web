@@ -5,7 +5,7 @@ import { SupabaseService } from '../../../core/supabase.service';
 
 interface KpiData {
   activeBatches: number;
-  totalBoxesToday: number;
+  totalYieldKgToday: number;
   packedBoxesToday: number;
   lowStockCount: number;
 }
@@ -55,13 +55,13 @@ interface PackingWarning {
             </p>
           </div>
 
-          <!-- Total Production (boxes today) -->
+          <!-- Total Production (kg today) -->
           <div class="beautiful-card" style="padding:20px;position:relative;overflow:hidden;">
             <div style="position:absolute;top:16px;right:16px;width:44px;height:44px;background:#dcfce7;border-radius:12px;display:flex;align-items:center;justify-content:center;">
               <span class="material-icons-round" style="color:var(--primary);font-size:22px;">inventory_2</span>
             </div>
             <p style="font-size:12px;color:var(--muted-fg);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin:0 0 8px;">Total Production</p>
-            <p class="font-display" style="font-size:36px;font-weight:700;color:var(--foreground);margin:0 0 6px;">{{ kpi().totalBoxesToday | number:'1.0-0' }}<span style="font-size:16px;font-weight:500;color:var(--muted-fg);"> boxes</span></p>
+            <p class="font-display" style="font-size:36px;font-weight:700;color:var(--foreground);margin:0 0 6px;">{{ kpi().totalYieldKgToday | number:'1.0-0' }}<span style="font-size:16px;font-weight:500;color:var(--muted-fg);"> kg</span></p>
             <p style="font-size:12px;color:var(--primary);margin:0;display:flex;align-items:center;gap:4px;">
               <span class="material-icons-round" style="font-size:14px;">today</span>
               Today only
@@ -185,7 +185,7 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
   private readonly router   = inject(Router);
 
   loading = signal(true);
-  kpi = signal<KpiData>({ activeBatches: 0, totalBoxesToday: 0, packedBoxesToday: 0, lowStockCount: 0 });
+  kpi = signal<KpiData>({ activeBatches: 0, totalYieldKgToday: 0, packedBoxesToday: 0, lowStockCount: 0 });
   packingWarnings = signal<PackingWarning[]>([]);
   showPackingModal = signal(false);
 
@@ -212,9 +212,9 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
         // Low stock ingredients
         this.supabase.client.from('inventory_raw_materials')
           .select('ingredient_id, current_qty, low_stock_threshold'),
-        // Today's production batches (for boxes today + packing warnings)
+        // Today's production batches (for yield today + packing warnings)
         this.supabase.client.from('production_batches')
-          .select('batch_code, planned_yield, flavor:gg_flavors!production_batches_flavor_id_fkey(name)')
+          .select('batch_code, planned_yield, actual_yield, flavor:gg_flavors!production_batches_flavor_id_fkey(name)')
           .eq('production_date', today),
         // Today's packing sessions (for packed today + packing warnings)
         this.supabase.client.from('packing_sessions')
@@ -222,12 +222,11 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
           .eq('session_date', today),
       ]);
 
-      // Total boxes produced today (derived from planned_yield)
+      // Total kg produced today (sum of actual_yield)
       const todayBatches = todayProdRes.data ?? [];
-      const totalBoxesToday = todayBatches.reduce((sum: number, b: any) => {
-        const planned = b.planned_yield ?? 0;
-        return sum + (planned >= 10000 ? 667 : 500);
-      }, 0);
+      const totalYieldKgToday = todayBatches.reduce(
+        (sum: number, b: any) => sum + (b.actual_yield ?? 0), 0
+      );
 
       // Total packed boxes today
       const packedBoxesToday = (todayPackRes.data ?? []).reduce(
@@ -241,7 +240,7 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
 
       this.kpi.set({
         activeBatches: batchRes.count ?? 0,
-        totalBoxesToday,
+        totalYieldKgToday,
         packedBoxesToday,
         lowStockCount: lowStock,
       });

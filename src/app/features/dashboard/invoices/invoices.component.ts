@@ -227,6 +227,7 @@ interface InvoiceRow {
                 <th style="text-align:left;padding:12px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Items</th>
                 <th style="text-align:left;padding:12px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Dispatch Date</th>
                 <th style="text-align:center;padding:12px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Status</th>
+                <th style="text-align:center;padding:12px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -256,6 +257,15 @@ interface InvoiceRow {
                       <span style="padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700;background:#fef3c7;color:#b45309;">Pending</span>
                     }
                   </td>
+                  <td style="padding:14px 16px;text-align:center;">
+                    @if (!inv.is_dispatched) {
+                      <button (click)="openEdit(inv)"
+                              style="padding:5px 12px;background:#f8f9fa;border:1px solid #E5E7EB;border-radius:6px;font-size:12px;font-weight:600;color:#374151;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">
+                        <span class="material-icons-round" style="font-size:14px;">edit</span>
+                        Edit
+                      </button>
+                    }
+                  </td>
                 </tr>
               }
             </tbody>
@@ -263,6 +273,118 @@ interface InvoiceRow {
         </div>
       }
     </div>
+
+    <!-- Edit Invoice Modal -->
+    @if (editingInvoice()) {
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px;"
+           (click)="closeEdit()">
+        <div style="background:#fff;border-radius:16px;width:100%;max-width:600px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.2);"
+             (click)="$event.stopPropagation()">
+
+          <!-- Modal header -->
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid #E5E7EB;position:sticky;top:0;background:#fff;z-index:1;">
+            <div>
+              <h2 style="font-size:16px;font-weight:700;color:#121212;margin:0 0 2px;">Edit Invoice</h2>
+              <p style="font-size:12px;color:#9CA3AF;margin:0;font-family:monospace;">{{ editingInvoice()!.invoice_number }}</p>
+            </div>
+            <button (click)="closeEdit()" style="border:none;background:none;cursor:pointer;color:#9CA3AF;display:flex;align-items:center;padding:4px;">
+              <span class="material-icons-round" style="font-size:20px;">close</span>
+            </button>
+          </div>
+
+          <!-- Modal body -->
+          <div style="padding:24px;">
+
+            <!-- Customer + Dispatch Date -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;" class="inv-top-grid">
+              <div>
+                <label class="inv-label">Customer *</label>
+                <input [(ngModel)]="editCustomerInput" list="cust-list" class="gg-input"
+                       placeholder="Customer name"
+                       (input)="onEditCustomerInput()">
+                @if (editCustomerHint()) {
+                  <p style="font-size:11px;margin:3px 0 0;"
+                     [style.color]="editCustomerIsNew() ? '#d97706' : '#16a34a'">{{ editCustomerHint() }}</p>
+                }
+              </div>
+              <div>
+                <label class="inv-label">Expected Dispatch Date</label>
+                <input [ngModel]="editDispatchDate()" (ngModelChange)="editDispatchDate.set($event)"
+                       type="date" class="gg-input">
+              </div>
+            </div>
+
+            <!-- Items -->
+            <div style="margin-bottom:20px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                <label class="inv-label" style="margin:0;">Flavors &amp; Quantities</label>
+                <button type="button" (click)="addEditItemLine()"
+                        style="padding:5px 12px;background:#f0fdf4;border:1px solid #01AC51;color:#01AC51;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;">
+                  <span class="material-icons-round" style="font-size:14px;">add</span> Add flavor
+                </button>
+              </div>
+
+              @if (editItemLines().length === 0) {
+                <div style="padding:20px;border:2px dashed #E5E7EB;border-radius:10px;text-align:center;color:#9CA3AF;font-size:13px;">
+                  No items — click "Add flavor" to add order lines.
+                </div>
+              } @else {
+                <div style="border:1px solid #E5E7EB;border-radius:10px;overflow:hidden;">
+                  <div style="display:grid;grid-template-columns:1fr 160px 36px;gap:8px;padding:8px 12px;background:#f8f9fa;border-bottom:1px solid #E5E7EB;">
+                    <span style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Flavor</span>
+                    <span style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">No. of Boxes</span>
+                    <span></span>
+                  </div>
+                  @for (line of editItemLines(); track $index) {
+                    <div style="display:grid;grid-template-columns:1fr 160px 36px;gap:8px;padding:8px 12px;border-bottom:1px solid #f3f4f6;align-items:center;">
+                      <select [(ngModel)]="line.flavor_id" class="gg-input dropdown-with-arrow" style="font-size:13px;"
+                              (change)="onEditFlavorSelect(line)">
+                        <option value="">Select flavor…</option>
+                        @for (f of flavors(); track f.id) {
+                          <option [value]="f.id">{{ f.name }}</option>
+                        }
+                      </select>
+                      <input [(ngModel)]="line.quantity_boxes" type="number" min="1" step="1" class="gg-input"
+                             placeholder="0" style="font-size:13px;">
+                      <button type="button" (click)="removeEditItemLine($index)"
+                              style="width:32px;height:32px;background:#fff5f5;border:1px solid #fca5a5;border-radius:6px;color:#dc2626;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                        <span class="material-icons-round" style="font-size:15px;">delete_outline</span>
+                      </button>
+                    </div>
+                  }
+                  <div style="display:grid;grid-template-columns:1fr 160px 36px;gap:8px;padding:8px 12px;background:#f8f9fa;align-items:center;">
+                    <span style="font-size:12px;font-weight:600;color:#374151;">Total Boxes</span>
+                    <span style="font-size:13px;font-weight:700;color:#01AC51;">{{ editTotalBoxes() | number }}</span>
+                    <span></span>
+                  </div>
+                </div>
+              }
+            </div>
+
+            @if (editError()) {
+              <div style="display:flex;align-items:center;gap:6px;color:#dc2626;font-size:13px;margin-bottom:14px;padding:10px 14px;background:#fff5f5;border:1px solid #fca5a5;border-radius:8px;">
+                <span class="material-icons-round" style="font-size:16px;">error_outline</span>
+                {{ editError() }}
+              </div>
+            }
+
+            <div style="display:flex;gap:10px;align-items:center;">
+              <button (click)="saveEdit()" [disabled]="editSaving()"
+                      style="padding:9px 20px;background:#01AC51;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;"
+                      [style.opacity]="editSaving() ? '0.7' : '1'">
+                <span class="material-icons-round" style="font-size:16px;">save</span>
+                {{ editSaving() ? 'Saving…' : 'Save Changes' }}
+              </button>
+              <button type="button" (click)="closeEdit()"
+                      style="padding:9px 16px;background:#f3f4f6;border:1px solid #E5E7EB;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;color:#374151;">
+                Cancel
+              </button>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    }
 
     <style>
       @media (max-width:700px) { .inv-top-grid { grid-template-columns: 1fr !important; } }
@@ -288,12 +410,26 @@ export class InvoicesComponent implements OnInit {
   customerHint      = signal('');
   customerIsNew     = signal(false);
 
+  // Edit state
+  editingInvoice      = signal<InvoiceRow | null>(null);
+  editItemLines       = signal<{ flavor_id: string; flavor_name: string; quantity_boxes: number }[]>([]);
+  editCustomerInput   = '';
+  editCustomerHint    = signal('');
+  editCustomerIsNew   = signal(false);
+  editDispatchDate    = signal('');
+  editSaving          = signal(false);
+  editError           = signal('');
+
   // Filters
   customerFilter = signal('');
   statusFilter   = signal('all');
 
   readonly totalBoxes = computed(() =>
     this.itemLines().reduce((s, l) => s + (Number(l.quantity_boxes) || 0), 0)
+  );
+
+  readonly editTotalBoxes = computed(() =>
+    this.editItemLines().reduce((s, l) => s + (Number(l.quantity_boxes) || 0), 0)
   );
 
   readonly filteredInvoices = computed(() => {
@@ -359,6 +495,90 @@ export class InvoicesComponent implements OnInit {
 
   removeItemLine(i: number): void {
     this.itemLines.update(l => l.filter((_, idx) => idx !== i));
+  }
+
+  openEdit(inv: InvoiceRow): void {
+    this.editingInvoice.set(inv);
+    this.editCustomerInput = inv.customer_name;
+    this.editCustomerHint.set('');
+    this.editCustomerIsNew.set(false);
+    this.editDispatchDate.set(inv.expected_dispatch_date ?? '');
+    this.editItemLines.set(inv.items.map(it => ({ ...it })));
+    this.editError.set('');
+  }
+
+  closeEdit(): void {
+    this.editingInvoice.set(null);
+    this.editItemLines.set([]);
+    this.editError.set('');
+  }
+
+  onEditCustomerInput(): void {
+    const name = this.editCustomerInput.trim();
+    if (!name) { this.editCustomerHint.set(''); return; }
+    const existing = this.customers().find(c => c.name.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      this.editCustomerIsNew.set(false);
+      this.editCustomerHint.set('✓ Existing customer');
+    } else {
+      this.editCustomerIsNew.set(true);
+      this.editCustomerHint.set('New customer — will be created on save');
+    }
+  }
+
+  onEditFlavorSelect(line: { flavor_id: string; flavor_name: string; quantity_boxes: number }): void {
+    const f = this.flavors().find(fl => fl.id === line.flavor_id);
+    if (f) line.flavor_name = f.name;
+  }
+
+  addEditItemLine(): void {
+    this.editItemLines.update(l => [...l, { flavor_id: '', flavor_name: '', quantity_boxes: 0 }]);
+  }
+
+  removeEditItemLine(i: number): void {
+    this.editItemLines.update(l => l.filter((_, idx) => idx !== i));
+  }
+
+  async saveEdit(): Promise<void> {
+    const inv = this.editingInvoice();
+    if (!inv) return;
+
+    const customerName = this.editCustomerInput.trim();
+    if (!customerName) { this.editError.set('Please enter a customer name.'); return; }
+
+    const validItems = this.editItemLines().filter(l => l.flavor_id && l.quantity_boxes > 0);
+    if (validItems.length === 0) { this.editError.set('Add at least one flavor with a quantity.'); return; }
+
+    this.editSaving.set(true);
+    this.editError.set('');
+
+    try {
+      const customerId = await this.resolveCustomerId(customerName);
+
+      // Determine if any flavor quantity increased — if so, reset is_packed
+      const oldMap = new Map<string, number>(inv.items.map(it => [it.flavor_id, it.quantity_boxes]));
+      const anyIncreased = validItems.some(it => (it.quantity_boxes ?? 0) > (oldMap.get(it.flavor_id) ?? 0));
+      const newIsPacked = anyIncreased ? false : inv.is_packed;
+
+      const { error } = await this.supabase.client
+        .from('gg_invoices')
+        .update({
+          customer_id:            customerId,
+          customer_name:          customerName,
+          items:                  validItems,
+          expected_dispatch_date: this.editDispatchDate() || null,
+          is_packed:              newIsPacked,
+        })
+        .eq('id', inv.id);
+
+      if (error) { this.editError.set(error.message); return; }
+
+      this.showToast('Invoice updated successfully', 'success');
+      this.closeEdit();
+      await this.loadInvoices();
+    } finally {
+      this.editSaving.set(false);
+    }
   }
 
   async save(): Promise<void> {
