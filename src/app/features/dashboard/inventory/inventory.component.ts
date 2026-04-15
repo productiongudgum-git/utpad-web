@@ -26,7 +26,7 @@ interface FlavorGroup {
       <div style="margin-bottom:24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
         <div>
           <h1 style="font-family:'Cabin',sans-serif;font-size:22px;font-weight:700;color:#121212;margin:0 0 4px;">Inventory</h1>
-          <p style="color:#6B7280;font-size:14px;margin:0;">Net box stock by flavor. Packed from packing sessions minus dispatched via packed invoices. Click a row to expand.</p>
+          <p style="color:#6B7280;font-size:14px;margin:0;">Net box stock by flavor. Packed from packing sessions minus dispatched via dispatch events. Click a row to expand.</p>
         </div>
         <button (click)="loadData()" style="padding:8px 16px;background:#f3f4f6;border:1px solid #E5E7EB;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:6px;color:#374151;">
           <span class="material-icons-round" style="font-size:16px;">refresh</span>
@@ -167,53 +167,41 @@ export class InventoryComponent implements OnInit {
   async loadData(): Promise<void> {
     this.loading.set(true);
 
-    // ── 1. Fetch pre-aggregated inventory from view ──────────────────
+    // ── 1. Fetch pre-aggregated packed stock from view ───────────────
     const { data: sessions } = await this.supabase.client
       .from('inventory_by_flavor')
       .select('*');
 
-    // ── 2. Fetch packed invoices and sum boxes per flavor ────────────
-    const { data: invoices } = await this.supabase.client
-      .from('gg_invoices')
-      .select('items')
-      .eq('is_packed', true);
+    // ── 2. Fetch dispatch_events — single source of truth for dispatched ──
+    const { data: dispatchEvents } = await this.supabase.client
+      .from('dispatch_events')
+      .select('flavor_id, sku_id, batch_code, boxes_dispatched');
 
-    // Build dispatched map: flavorId → total boxes
-    const dispatchedMap = new Map<string, number>();
-    for (const inv of (invoices ?? []) as any[]) {
-      const items: any[] = Array.isArray(inv.items) ? inv.items : [];
-      for (const item of items) {
-        const fid: string = item.flavor_id ?? '';
-        const qty: number = Number(item.quantity_boxes) || 0;
-        if (fid && qty > 0) {
-          dispatchedMap.set(fid, (dispatchedMap.get(fid) ?? 0) + qty);
+    // Build both maps from dispatch_events:
+    //   dispatchedMap:      flavorId → total boxes dispatched (flavor-level)
+    //   batchDispatchedMap: "flavorId|batchCode" → boxes dispatched (batch-level)
+    const dispatchedMap     = new Map<string, number>();
+    const batchDispatchedMap = new Map<string, number>();
+
+    for (const de of (dispatchEvents ?? []) as any[]) {
+      // dispatch_events may use flavor_id (newer) or sku_id (original schema)
+      const fid: string = de.flavor_id ?? de.sku_id ?? '';
+      const bc: string  = de.batch_code ?? '';
+      const qty: number = Number(de.boxes_dispatched) || 0;
+      if (fid && qty > 0) {
+        dispatchedMap.set(fid, (dispatchedMap.get(fid) ?? 0) + qty);
+        if (bc) {
+          const key = `${fid}|${bc}`;
+          batchDispatchedMap.set(key, (batchDispatchedMap.get(key) ?? 0) + qty);
         }
       }
     }
 
-    // ── 3. Fetch dispatch_events to get dispatched boxes per batch_code ──
-    const { data: dispatchEvents } = await this.supabase.client
-      .from('dispatch_events')
-      .select('flavor_id, batch_code, boxes_dispatched');
-
-    // Build per-batch dispatched map: "flavorId|batchCode" → total dispatched
-    const batchDispatchedMap = new Map<string, number>();
-    for (const de of (dispatchEvents ?? []) as any[]) {
-      const fid: string = de.flavor_id ?? '';
-      const bc: string = de.batch_code ?? '';
-      const qty: number = Number(de.boxes_dispatched) || 0;
-      if (fid && bc && qty > 0) {
-        const key = `${fid}|${bc}`;
-        batchDispatchedMap.set(key, (batchDispatchedMap.get(key) ?? 0) + qty);
-      }
-    }
-
     console.log('[Inventory] raw inventory_by_flavor:', sessions);
-    console.log('[Inventory] raw packed invoices:', invoices);
-    console.log('[Inventory] dispatchedMap:', Object.fromEntries(dispatchedMap));
+    console.log('[Inventory] dispatchedMap (from dispatch_events):', Object.fromEntries(dispatchedMap));
     console.log('[Inventory] batchDispatchedMap:', Object.fromEntries(batchDispatchedMap));
 
-    // ── 4. Group view rows by flavor_id ─────────────────────────────
+    // ── 3. Group view rows by flavor_id ─────────────────────────────
     const groupMap = new Map<string, FlavorGroup>();
     for (const row of (sessions ?? []) as any[]) {
       const flavorId: string = row.flavor_id ?? 'unknown';
@@ -239,13 +227,13 @@ export class InventoryComponent implements OnInit {
       group.batches.push({ batchCode, boxesPacked, netStock: batchNetStock });
     }
 
-    // ── 5. Apply dispatched totals and compute flavor-level net ─────
+    // ── 4. Apply dispatched totals and compute flavor-level net ─────
     for (const group of groupMap.values()) {
       group.totalDispatched = dispatchedMap.get(group.flavorId) ?? 0;
       group.netStock = group.totalPacked - group.totalDispatched;
     }
 
-    // ── 6. Sort by flavor name ───────────────────────────────────────
+    // ── 5. Sort by flavor name ───────────────────────────────────────
     const sorted = Array.from(groupMap.values()).sort((a, b) =>
       a.flavorName.localeCompare(b.flavorName)
     );
