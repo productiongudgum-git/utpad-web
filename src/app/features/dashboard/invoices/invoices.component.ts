@@ -21,6 +21,9 @@ interface InvoiceRow {
   is_packed: boolean;
   is_dispatched: boolean;
   created_at: string;
+  total_boxes: number;
+  boxes_returned: number;
+  return_status: 'none' | 'partially_returned' | 'completely_returned';
 }
 
 @Component({
@@ -227,6 +230,7 @@ interface InvoiceRow {
                 <th style="text-align:left;padding:12px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Items</th>
                 <th style="text-align:left;padding:12px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Dispatch Date</th>
                 <th style="text-align:center;padding:12px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Status</th>
+                <th style="text-align:center;padding:12px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Returns</th>
                 <th style="text-align:center;padding:12px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Actions</th>
               </tr>
             </thead>
@@ -255,6 +259,21 @@ interface InvoiceRow {
                       <span style="padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700;background:#dbeafe;color:#1d4ed8;">Packed</span>
                     } @else {
                       <span style="padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700;background:#fef3c7;color:#b45309;">Pending</span>
+                    }
+                  </td>
+                  <td style="padding:14px 16px;text-align:center;">
+                    @if (inv.return_status === 'completely_returned') {
+                      <div style="display:flex;flex-direction:column;align-items:center;gap:3px;">
+                        <span style="padding:3px 8px;border-radius:999px;font-size:10px;font-weight:700;background:#dc2626;color:#fff;white-space:nowrap;">Completely Returned</span>
+                        <span style="font-size:11px;color:#dc2626;font-weight:600;">{{ inv.boxes_returned }}/{{ inv.total_boxes }} boxes</span>
+                      </div>
+                    } @else if (inv.return_status === 'partially_returned') {
+                      <div style="display:flex;flex-direction:column;align-items:center;gap:3px;">
+                        <span style="padding:3px 8px;border-radius:999px;font-size:10px;font-weight:700;background:#d97706;color:#fff;white-space:nowrap;">Partially Returned</span>
+                        <span style="font-size:11px;color:#d97706;font-weight:600;">{{ inv.boxes_returned }}/{{ inv.total_boxes }} boxes</span>
+                      </div>
+                    } @else {
+                      <span style="font-size:12px;color:#D1D5DB;">—</span>
                     }
                   </td>
                   <td style="padding:14px 16px;text-align:center;">
@@ -635,22 +654,47 @@ export class InvoicesComponent implements OnInit {
 
   private async loadInvoices(): Promise<void> {
     this.loading.set(true);
-    const { data } = await this.supabase.client
-      .from('gg_invoices')
-      .select('id, invoice_number, customer_name, items, expected_dispatch_date, is_packed, is_dispatched, created_at')
-      .order('created_at', { ascending: false })
-      .limit(200);
 
-    this.invoices.set((data ?? []).map((d: any) => ({
-      id:                     d.id,
-      invoice_number:         d.invoice_number,
-      customer_name:          d.customer_name ?? '—',
-      items:                  Array.isArray(d.items) ? d.items : [],
-      expected_dispatch_date: d.expected_dispatch_date ?? null,
-      is_packed:              d.is_packed ?? false,
-      is_dispatched:          d.is_dispatched ?? false,
-      created_at:             d.created_at,
-    })));
+    const [{ data }, { data: returnsData }] = await Promise.all([
+      this.supabase.client
+        .from('gg_invoices')
+        .select('id, invoice_number, customer_name, items, expected_dispatch_date, is_packed, is_dispatched, created_at')
+        .order('created_at', { ascending: false })
+        .limit(200),
+      this.supabase.client
+        .from('returns_events')
+        .select('invoice_id, qty_returned'),
+    ]);
+
+    // Aggregate returned boxes per invoice
+    const retMap = new Map<string, number>();
+    for (const r of (returnsData ?? []) as any[]) {
+      if (!r.invoice_id) continue;
+      retMap.set(r.invoice_id, (retMap.get(r.invoice_id) ?? 0) + (r.qty_returned ?? 0));
+    }
+
+    this.invoices.set((data ?? []).map((d: any) => {
+      const items: InvoiceItem[] = Array.isArray(d.items) ? d.items : [];
+      const total_boxes = items.reduce((s, it) => s + (Number(it.quantity_boxes) || 0), 0);
+      const boxes_returned = retMap.get(d.id) ?? 0;
+      let return_status: InvoiceRow['return_status'] = 'none';
+      if (boxes_returned > 0 && d.is_dispatched) {
+        return_status = boxes_returned >= total_boxes ? 'completely_returned' : 'partially_returned';
+      }
+      return {
+        id:                     d.id,
+        invoice_number:         d.invoice_number,
+        customer_name:          d.customer_name ?? '—',
+        items,
+        expected_dispatch_date: d.expected_dispatch_date ?? null,
+        is_packed:              d.is_packed ?? false,
+        is_dispatched:          d.is_dispatched ?? false,
+        created_at:             d.created_at,
+        total_boxes,
+        boxes_returned,
+        return_status,
+      };
+    }));
     this.loading.set(false);
   }
 
