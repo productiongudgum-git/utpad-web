@@ -217,9 +217,9 @@ export class ReturnsComponent implements OnInit {
           customer_name:    inv.customer_name,
           total_dispatched: inv.total_dispatched,
           total_returned,
-          status:           total_returned >= inv.total_dispatched
+          status:           (total_returned >= inv.total_dispatched
                               ? 'completely_returned'
-                              : 'partially_returned',
+                              : 'partially_returned') as InvoiceSummary['status'],
         };
       })
       .sort((a, b) => a.invoice_number.localeCompare(b.invoice_number));
