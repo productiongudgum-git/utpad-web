@@ -19,7 +19,10 @@
       "Bash(curl:*)",
       "Bash(ls:*)",
       "Bash(npx tsc:*)",
-      "Bash(node_modules/.bin/tsc --noEmit)"
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Bash(grep *)",
+      "Bash(find *)",
+      "Bash(cat /c/Users/BHARAT/Documents/GitHub/utpad-web/supabase_*.sql)"
     ]
   }
 }

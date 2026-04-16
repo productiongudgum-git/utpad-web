@@ -34,6 +34,7 @@ export const routes: Routes = [
       { path: 'wastage',     loadComponent: () => import('./features/dashboard/wastage/wastage.component').then(m => m.WastageComponent) },
       { path: 'dispatch',    loadComponent: () => import('./features/dashboard/dispatch/dispatch.component').then(m => m.DispatchComponent) },
       { path: 'invoices',    loadComponent: () => import('./features/dashboard/invoices/invoices.component').then(m => m.InvoicesComponent) },
+      { path: 'd2c',         loadComponent: () => import('./features/dashboard/d2c/d2c.component').then(m => m.D2CComponent) },
       { path: 'reports',     loadComponent: () => import('./features/dashboard/reports/reports.component').then(m => m.ReportsComponent) },
     ],
   },

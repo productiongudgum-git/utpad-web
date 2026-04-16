@@ -122,6 +122,7 @@ export class DashboardShellComponent {
     { label: 'Team',        icon: 'group',                   route: 'team' },
     { label: 'Wastage',     icon: 'delete_sweep',            route: 'wastage' },
     { label: 'Invoices',    icon: 'description',             route: 'invoices' },
+    { label: 'D2C',         icon: 'storefront',              route: 'd2c' },
     { label: 'Reports',     icon: 'download',                route: 'reports' },
   ];
 
