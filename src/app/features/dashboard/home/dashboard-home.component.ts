@@ -26,8 +26,9 @@ interface BatchDetail {
   batch_code: string;
   batch_number: number | null;
   flavor_name: string;
-  expected_boxes: number;
   production_date: string;
+  total_packed: number;
+  packing_status: 'complete' | 'partial' | 'none';
 }
 
 @Component({
@@ -171,17 +172,28 @@ interface BatchDetail {
                     <th style="text-align:left;padding:10px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Batch Code</th>
                     <th style="text-align:left;padding:10px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Batch #</th>
                     <th style="text-align:left;padding:10px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Flavour</th>
-                    <th style="text-align:right;padding:10px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Expected Boxes</th>
+                    <th style="text-align:left;padding:10px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Packed Boxes</th>
                     <th style="text-align:left;padding:10px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Production Date</th>
                   </tr>
                 </thead>
                 <tbody>
                   @for (b of filteredBatches(); track b.batch_code) {
-                    <tr style="border-bottom:1px solid #f3f4f6;">
+                    <tr [style.background]="isRowRed(b) ? '#fee2e2' : ''" style="border-bottom:1px solid #f3f4f6;">
                       <td style="padding:12px 16px;font-family:monospace;font-size:13px;font-weight:700;color:#121212;">{{ b.batch_code }}</td>
                       <td style="padding:12px 16px;font-size:13px;color:#374151;">{{ b.batch_number ?? '—' }}</td>
                       <td style="padding:12px 16px;font-size:13px;color:#374151;">{{ b.flavor_name }}</td>
-                      <td style="padding:12px 16px;text-align:right;font-size:13px;font-weight:600;color:#121212;">{{ b.expected_boxes }}</td>
+                      <td style="padding:12px 16px;font-size:13px;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                          <span style="font-weight:600;color:#121212;">{{ b.total_packed }}</span>
+                          @if (b.packing_status === 'complete') {
+                            <span style="font-size:11px;font-weight:600;background:#dcfce7;color:#15803d;padding:2px 8px;border-radius:10px;white-space:nowrap;">Packing Complete</span>
+                          } @else if (b.packing_status === 'partial') {
+                            <span style="font-size:11px;font-weight:600;background:#ffedd5;color:#c2410c;padding:2px 8px;border-radius:10px;white-space:nowrap;">Partially Packed</span>
+                          } @else {
+                            <span style="font-size:11px;font-weight:600;background:#f3f4f6;color:#6B7280;padding:2px 8px;border-radius:10px;white-space:nowrap;">Not Packed</span>
+                          }
+                        </div>
+                      </td>
                       <td style="padding:12px 16px;font-size:13px;color:#6B7280;">{{ b.production_date }}</td>
                     </tr>
                   }
@@ -394,25 +406,60 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
     if (!this.batchFilterFrom || !this.batchFilterTo) return;
     this.batchDetailsLoading.set(true);
     try {
-      const { data, error } = await this.supabase.client
+      const { data: batchData, error: batchError } = await this.supabase.client
         .from('production_batches')
-        .select('batch_code, batch_number, expected_boxes, production_date, flavor:gg_flavors!production_batches_flavor_id_fkey(name)')
+        .select('id, batch_code, batch_number, production_date, flavor:gg_flavors!production_batches_flavor_id_fkey(name)')
         .gte('production_date', this.batchFilterFrom)
         .lte('production_date', this.batchFilterTo)
         .order('production_date', { ascending: false })
         .order('batch_code', { ascending: false });
 
-      if (!error && data) {
-        this.batchDetails.set(data.map((b: any) => ({
+      if (batchError || !batchData) return;
+
+      const batchIds = batchData.map((b: any) => b.id);
+      const { data: packData } = batchIds.length > 0
+        ? await this.supabase.client
+            .from('packing_sessions')
+            .select('production_batch_id, boxes_packed, status')
+            .in('production_batch_id', batchIds)
+        : { data: [] };
+
+      // Aggregate packing data per batch id
+      const packMap = new Map<string, { total: number; statuses: string[] }>();
+      for (const p of (packData ?? [])) {
+        const id = p.production_batch_id;
+        const entry = packMap.get(id) ?? { total: 0, statuses: [] };
+        entry.total += p.boxes_packed ?? 0;
+        entry.statuses.push(p.status ?? '');
+        packMap.set(id, entry);
+      }
+
+      this.batchDetails.set(batchData.map((b: any) => {
+        const pack = packMap.get(b.id);
+        let packing_status: 'complete' | 'partial' | 'none' = 'none';
+        if (pack) {
+          packing_status = pack.statuses.some(s => s === 'complete') ? 'complete' : 'partial';
+        }
+        return {
           batch_code:      b.batch_code,
           batch_number:    b.batch_number ?? null,
           flavor_name:     b.flavor?.name ?? '—',
-          expected_boxes:  b.expected_boxes ?? 0,
           production_date: b.production_date,
-        })));
-      }
+          total_packed:    pack?.total ?? 0,
+          packing_status,
+        };
+      }));
     } finally {
       this.batchDetailsLoading.set(false);
     }
+  }
+
+  isRowRed(b: BatchDetail): boolean {
+    if (b.packing_status === 'complete') return false;
+    const prodDate = new Date(b.production_date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffDays = Math.floor((today.getTime() - prodDate.getTime()) / 86400000);
+    return diffDays > 3;
   }
 }
