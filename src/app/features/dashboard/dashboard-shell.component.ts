@@ -117,6 +117,7 @@ export class DashboardShellComponent {
     { label: 'Dashboard',   icon: 'dashboard',              route: 'home' },
     { label: 'Live Kanban', icon: 'view_kanban',             route: 'kanban' },
     { label: 'Recipes',     icon: 'science',                 route: 'recipes' },
+    { label: 'Flavors',     icon: 'local_dining',            route: 'flavors' },
     { label: 'Inventory',   icon: 'inventory_2',             route: 'inventory' },
     { label: 'Ingredients', icon: 'category',                route: 'ingredients' },
     { label: 'Team',        icon: 'group',                   route: 'team' },
