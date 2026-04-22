@@ -2,6 +2,10 @@ import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule, DecimalPipe } from '@angular/common';
 import { SupabaseService } from '../../../core/supabase.service';
 
+function fmtDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 interface BatchDetail {
   batchCode: string;
   boxesPacked: number;
@@ -23,7 +27,7 @@ interface FlavorGroup {
   imports: [CommonModule, DecimalPipe],
   template: `
     <div style="padding:24px;max-width:1100px;">
-      <div style="margin-bottom:24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+      <div style="margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
         <div>
           <h1 style="font-family:'Cabin',sans-serif;font-size:22px;font-weight:700;color:#121212;margin:0 0 4px;">Inventory</h1>
           <p style="color:#6B7280;font-size:14px;margin:0;">Net box stock by flavor. Packed from packing sessions minus dispatched via dispatch events. Click a row to expand.</p>
@@ -32,6 +36,22 @@ interface FlavorGroup {
           <span class="material-icons-round" style="font-size:16px;">refresh</span>
           Refresh
         </button>
+      </div>
+
+      <!-- Date range filter -->
+      <div style="margin-bottom:20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <label style="font-size:13px;font-weight:600;color:#6B7280;white-space:nowrap;">From</label>
+          <input type="date" [value]="fromDate()"
+                 (change)="onFromDateChange($event)"
+                 style="padding:7px 10px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;color:#374151;background:#fff;cursor:pointer;outline:none;">
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <label style="font-size:13px;font-weight:600;color:#6B7280;white-space:nowrap;">To</label>
+          <input type="date" [value]="toDate()"
+                 (change)="onToDateChange($event)"
+                 style="padding:7px 10px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;color:#374151;background:#fff;cursor:pointer;outline:none;">
+        </div>
       </div>
 
       @if (loading()) {
@@ -105,7 +125,7 @@ interface FlavorGroup {
                             </tr>
                           </thead>
                           <tbody>
-                            @for (b of fg.batches; track b.batchCode) {
+                            @for (b of positiveBatches(fg.batches); track b.batchCode) {
                               <tr style="border-bottom:1px solid #f3f4f6;">
                                 <td style="padding:8px 12px;font-size:12px;font-weight:600;color:#374151;font-family:monospace;">{{ b.batchCode }}</td>
                                 <td style="padding:8px 12px;text-align:right;font-size:12px;font-weight:600;"
@@ -146,6 +166,9 @@ export class InventoryComponent implements OnInit {
   flavors = signal<FlavorGroup[]>([]);
   expandedFlavorId = signal<string | null>(null);
 
+  fromDate = signal(fmtDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
+  toDate = signal(fmtDate(new Date()));
+
   readonly grandTotalPacked = computed(() =>
     this.flavors().reduce((s, fg) => s + fg.totalPacked, 0)
   );
@@ -164,27 +187,46 @@ export class InventoryComponent implements OnInit {
     this.expandedFlavorId.update(id => (id === flavorId ? null : flavorId));
   }
 
+  onFromDateChange(event: Event): void {
+    this.fromDate.set((event.target as HTMLInputElement).value);
+    this.loadData();
+  }
+
+  onToDateChange(event: Event): void {
+    this.toDate.set((event.target as HTMLInputElement).value);
+    this.loadData();
+  }
+
+  positiveBatches(batches: BatchDetail[]): BatchDetail[] {
+    return batches.filter(b => b.netStock > 0);
+  }
+
   async loadData(): Promise<void> {
     this.loading.set(true);
+    const from = this.fromDate();
+    const to = this.toDate();
 
-    // ── 1. Fetch pre-aggregated packed stock from view ───────────────
+    // ── 1. Fetch packing sessions filtered by date range ────────────
     const { data: sessions } = await this.supabase.client
-      .from('inventory_by_flavor')
-      .select('*');
+      .from('packing_sessions')
+      .select('batch_code, boxes_packed, flavor_id, flavor:gg_flavors!packing_sessions_flavor_id_fkey(name)')
+      .gte('session_date', from)
+      .lte('session_date', to);
 
-    // ── 2. Fetch dispatch_events — single source of truth for dispatched ──
+    // ── 2. Fetch dispatch_events filtered by date range ──────────────
     const { data: dispatchEvents } = await this.supabase.client
       .from('dispatch_events')
-      .select('flavor_id, sku_id, batch_code, boxes_dispatched');
+      .select('flavor_id, sku_id, batch_code, boxes_dispatched')
+      .gte('dispatch_date', from)
+      .lte('dispatch_date', to);
 
-    // Build both maps from dispatch_events:
-    //   dispatchedMap:      flavorId → total boxes dispatched (flavor-level)
-    //   batchDispatchedMap: "flavorId|batchCode" → boxes dispatched (batch-level)
-    const dispatchedMap     = new Map<string, number>();
+    // Build dispatch maps:
+    //   dispatchedMap:      flavorId → total boxes dispatched
+    //   batchDispatchedMap: "flavorId|batchCode" → boxes dispatched
+    const dispatchedMap      = new Map<string, number>();
     const batchDispatchedMap = new Map<string, number>();
 
     for (const de of (dispatchEvents ?? []) as any[]) {
-      // dispatch_events may use flavor_id (newer) or sku_id (original schema)
       const fid: string = de.flavor_id ?? de.sku_id ?? '';
       const bc: string  = de.batch_code ?? '';
       const qty: number = Number(de.boxes_dispatched) || 0;
@@ -197,48 +239,47 @@ export class InventoryComponent implements OnInit {
       }
     }
 
-    console.log('[Inventory] raw inventory_by_flavor:', sessions);
-    console.log('[Inventory] dispatchedMap (from dispatch_events):', Object.fromEntries(dispatchedMap));
-    console.log('[Inventory] batchDispatchedMap:', Object.fromEntries(batchDispatchedMap));
+    // ── 3. Aggregate packing sessions by flavor + batch ─────────────
+    const groupMap      = new Map<string, FlavorGroup>();
+    const batchPackedMap = new Map<string, number>(); // "flavorId|batchCode" → packed
 
-    // ── 3. Group view rows by flavor_id ─────────────────────────────
-    const groupMap = new Map<string, FlavorGroup>();
     for (const row of (sessions ?? []) as any[]) {
-      const flavorId: string = row.flavor_id ?? 'unknown';
-      const flavorName: string = row.flavor_name ?? 'Unknown';
-      const boxesPacked: number = Number(row.total_boxes_packed) || 0;
-      const batchCode: string = row.batch_code ?? '—';
+      const flavorId: string   = row.flavor_id ?? 'unknown';
+      const flavorName: string = (row.flavor as any)?.name ?? 'Unknown';
+      const boxesPacked: number = Number(row.boxes_packed) || 0;
+      const batchCode: string  = row.batch_code ?? '—';
+      const batchKey           = `${flavorId}|${batchCode}`;
 
       if (!groupMap.has(flavorId)) {
-        groupMap.set(flavorId, {
-          flavorId,
-          flavorName,
-          totalPacked: 0,
-          totalDispatched: 0,
-          netStock: 0,
-          batches: [],
-        });
+        groupMap.set(flavorId, { flavorId, flavorName, totalPacked: 0, totalDispatched: 0, netStock: 0, batches: [] });
       }
-      const group = groupMap.get(flavorId)!;
-      group.totalPacked += boxesPacked;
-
-      const batchDispatched = batchDispatchedMap.get(`${flavorId}|${batchCode}`) ?? 0;
-      const batchNetStock = Math.max(0, boxesPacked - batchDispatched);
-      group.batches.push({ batchCode, boxesPacked, netStock: batchNetStock });
+      groupMap.get(flavorId)!.totalPacked += boxesPacked;
+      batchPackedMap.set(batchKey, (batchPackedMap.get(batchKey) ?? 0) + boxesPacked);
     }
 
-    // ── 4. Apply dispatched totals and compute flavor-level net ─────
+    // ── 4. Build batch breakdown per flavor ──────────────────────────
+    for (const [batchKey, packed] of batchPackedMap) {
+      const sep      = batchKey.indexOf('|');
+      const flavorId = batchKey.substring(0, sep);
+      const batchCode = batchKey.substring(sep + 1);
+      const batchDispatched = batchDispatchedMap.get(batchKey) ?? 0;
+      groupMap.get(flavorId)?.batches.push({
+        batchCode,
+        boxesPacked: packed,
+        netStock: packed - batchDispatched,
+      });
+    }
+
+    // ── 5. Apply dispatched totals and compute flavor-level net ─────
     for (const group of groupMap.values()) {
       group.totalDispatched = dispatchedMap.get(group.flavorId) ?? 0;
       group.netStock = group.totalPacked - group.totalDispatched;
     }
 
-    // ── 5. Sort by flavor name ───────────────────────────────────────
+    // ── 6. Sort by flavor name ───────────────────────────────────────
     const sorted = Array.from(groupMap.values()).sort((a, b) =>
       a.flavorName.localeCompare(b.flavorName)
     );
-
-    console.log('[Inventory] flavorGroups:', JSON.parse(JSON.stringify(sorted)));
 
     this.flavors.set(sorted);
     this.loading.set(false);
