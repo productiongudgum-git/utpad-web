@@ -2,6 +2,7 @@ import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule, DatePipe } from '@angular/common';
 import { FormBuilder, ReactiveFormsModule, Validators, FormsModule } from '@angular/forms';
 import { SupabaseService } from '../../../core/supabase.service';
+import { CsvImportModalComponent } from './csv-import-modal.component';
 
 interface Customer { id: string; name: string; }
 interface Flavor   { id: string; name: string; }
@@ -29,7 +30,7 @@ interface InvoiceRow {
 @Component({
   selector: 'app-invoices',
   standalone: true,
-  imports: [CommonModule, DatePipe, ReactiveFormsModule, FormsModule],
+  imports: [CommonModule, DatePipe, ReactiveFormsModule, FormsModule, CsvImportModalComponent],
   styles: [`
     .inv-label { display:block; font-size:12px; font-weight:600; color:#374151; margin-bottom:6px; }
     .inv-toast { position:fixed; bottom:24px; right:24px; z-index:9999; padding:12px 18px; border-radius:10px; background:#1a1a1a; color:#fff; font-size:14px; font-weight:500; display:flex; align-items:center; gap:8px; box-shadow:0 4px 20px rgba(0,0,0,0.25); animation:slideUp 0.2s ease; }
@@ -59,12 +60,20 @@ interface InvoiceRow {
           <h1 style="font-family:'Cabin',sans-serif;font-size:22px;font-weight:700;color:#121212;margin:0 0 4px;">Invoices</h1>
           <p style="color:#6B7280;font-size:14px;margin:0;">Create and manage customer invoices.</p>
         </div>
-        <button (click)="openForm()" [disabled]="showForm()"
-                style="padding:9px 18px;background:#01AC51;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;"
-                [style.opacity]="showForm() ? '0.6' : '1'">
-          <span class="material-icons-round" style="font-size:18px;">add</span>
-          New Invoice
-        </button>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <button (click)="openImport()" [disabled]="showForm() || showImport()"
+                  style="padding:9px 16px;background:#fff;color:#01AC51;border:1px solid #01AC51;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;"
+                  [style.opacity]="(showForm() || showImport()) ? '0.6' : '1'">
+            <span class="material-icons-round" style="font-size:18px;">upload_file</span>
+            Import CSV
+          </button>
+          <button (click)="openForm()" [disabled]="showForm()"
+                  style="padding:9px 18px;background:#01AC51;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;"
+                  [style.opacity]="showForm() ? '0.6' : '1'">
+            <span class="material-icons-round" style="font-size:18px;">add</span>
+            New Invoice
+          </button>
+        </div>
       </div>
 
       <!-- Filters -->
@@ -405,6 +414,11 @@ interface InvoiceRow {
       </div>
     }
 
+    <!-- CSV Import Modal -->
+    @if (showImport()) {
+      <app-csv-import-modal (closed)="onImportClosed($event)"></app-csv-import-modal>
+    }
+
     <style>
       @media (max-width:700px) { .inv-top-grid { grid-template-columns: 1fr !important; } }
     </style>
@@ -414,9 +428,10 @@ export class InvoicesComponent implements OnInit {
   private readonly supabase = inject(SupabaseService);
   private readonly fb       = inject(FormBuilder);
 
-  loading   = signal(true);
-  saving    = signal(false);
-  showForm  = signal(false);
+  loading      = signal(true);
+  saving       = signal(false);
+  showForm     = signal(false);
+  showImport   = signal(false);
   invoices  = signal<InvoiceRow[]>([]);
   customers = signal<Customer[]>([]);
   flavors   = signal<Flavor[]>([]);
@@ -479,6 +494,19 @@ export class InvoicesComponent implements OnInit {
     this.itemLines.set([{ flavor_id: '', flavor_name: '', quantity_boxes: 0 }]);
     this.formError.set('');
     this.showForm.set(true);
+  }
+
+  openImport(): void {
+    this.showImport.set(true);
+  }
+
+  async onImportClosed(event: { imported: boolean }): Promise<void> {
+    this.showImport.set(false);
+    if (event.imported) {
+      // Refresh customers (some may have been created) and invoices
+      await Promise.all([this.loadCustomers(), this.loadInvoices()]);
+      this.showToast('Invoices imported successfully', 'success');
+    }
   }
 
   closeForm(): void {
