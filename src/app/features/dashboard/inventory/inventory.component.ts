@@ -15,15 +15,22 @@ interface BatchDetail {
   available: number;  // netStock − reserved (sellable now)
 }
 
+interface ReservedInvoice {
+  invoice_number: string;
+  customer_name: string;
+  boxes_reserved: number;
+}
+
 interface FlavorGroup {
   flavorId: string;
   flavorName: string;
   totalPacked: number;
   totalDispatched: number;
   netStock: number;       // totalPacked − totalDispatched
-  totalReserved: number;  // sum of allocated_batches on packed-not-dispatched invoices
+  totalReserved: number;  // sum of staged dispatch_events for this flavor
   available: number;      // netStock − totalReserved
   batches: BatchDetail[];
+  reservedInvoices: ReservedInvoice[];  // who's holding the reservation
 }
 
 @Component({
@@ -157,6 +164,29 @@ interface FlavorGroup {
                             }
                           </tbody>
                         </table>
+
+                        <!-- Reserved by invoice — only shown when there are reservations -->
+                        @if (fg.reservedInvoices.length > 0) {
+                          <p style="font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.5px;margin:14px 0 6px;">Reserved by invoice</p>
+                          <table style="width:100%;border-collapse:collapse;margin-top:4px;">
+                            <thead>
+                              <tr style="border-bottom:1px solid #E5E7EB;">
+                                <th style="text-align:left;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Invoice</th>
+                                <th style="text-align:left;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Customer</th>
+                                <th style="text-align:right;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Boxes</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              @for (inv of fg.reservedInvoices; track inv.invoice_number) {
+                                <tr style="border-bottom:1px solid #f3f4f6;">
+                                  <td style="padding:8px 12px;font-size:12px;font-weight:600;color:#374151;font-family:monospace;">{{ inv.invoice_number }}</td>
+                                  <td style="padding:8px 12px;font-size:12px;color:#374151;">{{ inv.customer_name }}</td>
+                                  <td style="padding:8px 12px;text-align:right;font-size:12px;font-weight:700;color:#b45309;">{{ inv.boxes_reserved | number:'1.0-0' }}</td>
+                                </tr>
+                              }
+                            </tbody>
+                          </table>
+                        }
                       </div>
                     </td>
                   </tr>
@@ -295,9 +325,11 @@ export class InventoryComponent implements OnInit, OnDestroy {
     //   These are reservations: invoices that have been packed (web modal or
     //   mobile pack flow) but not yet shipped. Not date-filtered because
     //   reservations are a "right now" view independent of the report range.
+    //   Includes invoice_number + customer_name so the expanded row can show
+    //   "who is holding this reservation".
     const reservedP = this.supabase.client
       .from('dispatch_events')
-      .select('flavor_id, sku_id, batch_code, boxes_dispatched')
+      .select('flavor_id, sku_id, batch_code, boxes_dispatched, invoice_number, customer_name')
       .eq('is_dispatched', false);
 
     const [{ data: sessions }, { data: dispatchEvents }, { data: stagedEvents }] =
@@ -322,15 +354,29 @@ export class InventoryComponent implements OnInit, OnDestroy {
     // Build reservation maps from staged dispatch_events (is_dispatched=false)
     const reservedFlavorMap = new Map<string, number>();
     const reservedBatchMap  = new Map<string, number>();
+    // Per-flavor breakdown by invoice (for the expanded row's "Reserved by invoice" sub-table)
+    const reservedInvoiceMap = new Map<string, Map<string, ReservedInvoice>>();
     for (const ev of (stagedEvents ?? []) as any[]) {
       const fid: string = ev.flavor_id ?? ev.sku_id ?? '';
       const bc:  string = ev.batch_code ?? '';
       const qty: number = Number(ev.boxes_dispatched) || 0;
+      const inv: string = ev.invoice_number ?? '';
+      const cust: string = ev.customer_name ?? '—';
       if (!fid || qty <= 0) continue;
       reservedFlavorMap.set(fid, (reservedFlavorMap.get(fid) ?? 0) + qty);
       if (bc) {
         const key = `${fid}|${bc}`;
         reservedBatchMap.set(key, (reservedBatchMap.get(key) ?? 0) + qty);
+      }
+      if (inv) {
+        if (!reservedInvoiceMap.has(fid)) reservedInvoiceMap.set(fid, new Map());
+        const perFlavor = reservedInvoiceMap.get(fid)!;
+        const existing = perFlavor.get(inv);
+        if (existing) {
+          existing.boxes_reserved += qty;
+        } else {
+          perFlavor.set(inv, { invoice_number: inv, customer_name: cust, boxes_reserved: qty });
+        }
       }
     }
 
@@ -350,7 +396,7 @@ export class InventoryComponent implements OnInit, OnDestroy {
           flavorId, flavorName,
           totalPacked: 0, totalDispatched: 0, netStock: 0,
           totalReserved: 0, available: 0,
-          batches: [],
+          batches: [], reservedInvoices: [],
         });
       }
       groupMap.get(flavorId)!.totalPacked += boxesPacked;
@@ -365,7 +411,7 @@ export class InventoryComponent implements OnInit, OnDestroy {
           flavorId: fid, flavorName: '(unknown — no recent packing)',
           totalPacked: 0, totalDispatched: 0, netStock: 0,
           totalReserved: 0, available: 0,
-          batches: [],
+          batches: [], reservedInvoices: [],
         });
       }
     }
@@ -387,12 +433,16 @@ export class InventoryComponent implements OnInit, OnDestroy {
       });
     }
 
-    // Apply flavor-level totals
+    // Apply flavor-level totals + reservedInvoices breakdown
     for (const group of groupMap.values()) {
       group.totalDispatched = dispatchedMap.get(group.flavorId) ?? 0;
       group.totalReserved   = reservedFlavorMap.get(group.flavorId) ?? 0;
       group.netStock        = group.totalPacked - group.totalDispatched;
       group.available       = group.netStock - group.totalReserved;
+      const invMap = reservedInvoiceMap.get(group.flavorId);
+      group.reservedInvoices = invMap
+        ? Array.from(invMap.values()).sort((a, b) => b.boxes_reserved - a.boxes_reserved)
+        : [];
     }
 
     const sorted = Array.from(groupMap.values()).sort((a, b) =>
