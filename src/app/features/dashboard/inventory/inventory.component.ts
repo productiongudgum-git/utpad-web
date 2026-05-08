@@ -19,6 +19,8 @@ interface ReservedInvoice {
   invoice_number: string;
   customer_name: string;
   boxes_reserved: number;
+  boxes_needed: number;       // from gg_invoices.items[flavor].quantity_boxes
+  status: 'full' | 'partial'; // full = reserved >= needed, partial = reserved < needed
 }
 
 interface FlavorGroup {
@@ -173,7 +175,8 @@ interface FlavorGroup {
                               <tr style="border-bottom:1px solid #E5E7EB;">
                                 <th style="text-align:left;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Invoice</th>
                                 <th style="text-align:left;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Customer</th>
-                                <th style="text-align:right;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Boxes</th>
+                                <th style="text-align:right;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Reserved / Needed</th>
+                                <th style="text-align:center;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Status</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -181,7 +184,19 @@ interface FlavorGroup {
                                 <tr style="border-bottom:1px solid #f3f4f6;">
                                   <td style="padding:8px 12px;font-size:12px;font-weight:600;color:#374151;font-family:monospace;">{{ inv.invoice_number }}</td>
                                   <td style="padding:8px 12px;font-size:12px;color:#374151;">{{ inv.customer_name }}</td>
-                                  <td style="padding:8px 12px;text-align:right;font-size:12px;font-weight:700;color:#b45309;">{{ inv.boxes_reserved | number:'1.0-0' }}</td>
+                                  <td style="padding:8px 12px;text-align:right;font-size:12px;font-weight:700;color:#b45309;">
+                                    {{ inv.boxes_reserved | number:'1.0-0' }}
+                                    @if (inv.boxes_needed > 0) {
+                                      <span style="color:#9CA3AF;font-weight:500;"> / {{ inv.boxes_needed | number:'1.0-0' }}</span>
+                                    }
+                                  </td>
+                                  <td style="padding:8px 12px;text-align:center;">
+                                    @if (inv.status === 'partial') {
+                                      <span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;background:#fef3c7;color:#b45309;text-transform:uppercase;letter-spacing:0.4px;">Partial</span>
+                                    } @else {
+                                      <span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;background:#dcfce7;color:#15803d;text-transform:uppercase;letter-spacing:0.4px;">Full</span>
+                                    }
+                                  </td>
                                 </tr>
                               }
                             </tbody>
@@ -324,21 +339,35 @@ export class InventoryComponent implements OnInit, OnDestroy {
       .from('dispatch_events')
       .select('flavor_id, sku_id, batch_code, boxes_dispatched, invoice_number, customer_name, dispatch_date, is_dispatched');
 
-    // ── 3. Fetch invoice statuses ────────────────────────────────────
-    //   Source of truth for "is this invoice dispatched yet?".
+    // ── 3. Fetch invoice statuses + items ────────────────────────────
+    //   Source of truth for "is this invoice dispatched yet?" plus the
+    //   quantity_boxes per flavor (used to compute partial vs full pack
+    //   in the Reserved-by-invoice expand).
     const invoicesP = this.supabase.client
       .from('gg_invoices')
-      .select('invoice_number, is_packed, is_dispatched');
+      .select('invoice_number, is_packed, is_dispatched, items');
 
     const [{ data: sessions }, { data: allEvents }, { data: invoicesData }] =
       await Promise.all([sessionsP, eventsP, invoicesP]);
 
-    // Map invoice_number → status flags
-    const invoiceStatus = new Map<string, { is_packed: boolean; is_dispatched: boolean }>();
+    // Map invoice_number → status flags + needed-boxes-per-flavor
+    const invoiceStatus = new Map<
+      string,
+      { is_packed: boolean; is_dispatched: boolean; needsByFlavor: Map<string, number> }
+    >();
     for (const inv of (invoicesData ?? []) as any[]) {
+      const needsByFlavor = new Map<string, number>();
+      const items = Array.isArray(inv.items) ? inv.items : [];
+      for (const it of items) {
+        const fid = String(it?.flavor_id ?? '');
+        const need = Number(it?.quantity_boxes) || 0;
+        if (!fid || need <= 0) continue;
+        needsByFlavor.set(fid, (needsByFlavor.get(fid) ?? 0) + need);
+      }
       invoiceStatus.set(inv.invoice_number, {
         is_packed: !!inv.is_packed,
         is_dispatched: !!inv.is_dispatched,
+        needsByFlavor,
       });
     }
 
@@ -358,11 +387,12 @@ export class InventoryComponent implements OnInit, OnDestroy {
       const date: string = ev.dispatch_date ?? '';
       if (!fid || qty <= 0) continue;
 
-      // Determine bucket: prefer parent invoice's flag; fall back to event's
-      // own flag for orphan events (D2C, mobile-only with no invoice row).
+      // Determine bucket: prefer parent invoice's is_dispatched; fall back to
+      // event's own flag for orphan events (D2C, mobile-only with no invoice
+      // row). Reserved = NOT dispatched (covers BLUE fully-packed AND YELLOW
+      // partially-packed — both have committed events that are still here).
       const status = inv ? invoiceStatus.get(inv) : undefined;
       const isInvoiceDispatched = status ? status.is_dispatched : !!ev.is_dispatched;
-      const isInvoicePacked     = status ? status.is_packed     : true;
 
       if (isInvoiceDispatched) {
         // DISPATCHED: applies date filter (only events shipped in range).
@@ -376,23 +406,37 @@ export class InventoryComponent implements OnInit, OnDestroy {
         continue;
       }
 
-      if (isInvoicePacked) {
-        // RESERVED: current-state, no date filter.
-        reservedFlavorMap.set(fid, (reservedFlavorMap.get(fid) ?? 0) + qty);
-        if (bc) {
-          const key = `${fid}|${bc}`;
-          reservedBatchMap.set(key, (reservedBatchMap.get(key) ?? 0) + qty);
+      // RESERVED: current-state, no date filter.
+      reservedFlavorMap.set(fid, (reservedFlavorMap.get(fid) ?? 0) + qty);
+      if (bc) {
+        const key = `${fid}|${bc}`;
+        reservedBatchMap.set(key, (reservedBatchMap.get(key) ?? 0) + qty);
+      }
+      if (inv) {
+        if (!reservedInvoiceMap.has(fid)) reservedInvoiceMap.set(fid, new Map());
+        const perFlavor = reservedInvoiceMap.get(fid)!;
+        const existing = perFlavor.get(inv);
+        if (existing) {
+          existing.boxes_reserved += qty;
+        } else {
+          const needed = status?.needsByFlavor.get(fid) ?? 0;
+          perFlavor.set(inv, {
+            invoice_number: inv,
+            customer_name: cust,
+            boxes_reserved: qty,
+            boxes_needed: needed,
+            status: needed > 0 && qty < needed ? 'partial' : 'full',
+          });
         }
-        if (inv) {
-          if (!reservedInvoiceMap.has(fid)) reservedInvoiceMap.set(fid, new Map());
-          const perFlavor = reservedInvoiceMap.get(fid)!;
-          const existing = perFlavor.get(inv);
-          if (existing) {
-            existing.boxes_reserved += qty;
-          } else {
-            perFlavor.set(inv, { invoice_number: inv, customer_name: cust, boxes_reserved: qty });
-          }
-        }
+      }
+    }
+
+    // After accumulation, recompute partial/full for each reserved invoice
+    // since boxes_reserved may have summed across multiple events for the
+    // same (flavor, invoice). Status depends on the final reserved total.
+    for (const perFlavor of reservedInvoiceMap.values()) {
+      for (const r of perFlavor.values()) {
+        r.status = r.boxes_needed > 0 && r.boxes_reserved < r.boxes_needed ? 'partial' : 'full';
       }
     }
 
