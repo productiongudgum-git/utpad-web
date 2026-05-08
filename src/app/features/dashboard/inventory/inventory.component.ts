@@ -387,14 +387,23 @@ export class InventoryComponent implements OnInit, OnDestroy {
       const date: string = ev.dispatch_date ?? '';
       if (!fid || qty <= 0) continue;
 
-      // Determine bucket: prefer parent invoice's is_dispatched; fall back to
-      // event's own flag for orphan events (D2C, mobile-only with no invoice
-      // row). Reserved = NOT dispatched (covers BLUE fully-packed AND YELLOW
-      // partially-packed — both have committed events that are still here).
+      // Determine bucket using BOTH flags (OR):
+      //   Dispatched if event.is_dispatched=true (individual shipment) OR
+      //                 invoice.is_dispatched=true (mobile blue dispatch
+      //                                             flips invoice but not
+      //                                             event flags).
+      //   Reserved otherwise (covers BLUE fully-packed AND YELLOW partial).
+      //
+      // This handles the case where one event of a multi-flavor invoice is
+      // already shipped (event flag true) but other flavors aren't yet, so
+      // the invoice flag is still false. Without OR, the shipped event
+      // would wrongly be counted as Reserved.
       const status = inv ? invoiceStatus.get(inv) : undefined;
-      const isInvoiceDispatched = status ? status.is_dispatched : !!ev.is_dispatched;
+      const invoiceDispatched = status ? status.is_dispatched : false;
+      const eventDispatched   = !!ev.is_dispatched;
+      const isDispatched      = invoiceDispatched || eventDispatched;
 
-      if (isInvoiceDispatched) {
+      if (isDispatched) {
         // DISPATCHED: applies date filter (only events shipped in range).
         if (date && date >= from && date <= to) {
           dispatchedMap.set(fid, (dispatchedMap.get(fid) ?? 0) + qty);
