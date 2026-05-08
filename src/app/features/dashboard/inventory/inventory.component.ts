@@ -312,70 +312,86 @@ export class InventoryComponent implements OnInit, OnDestroy {
       .gte('session_date', from)
       .lte('session_date', to);
 
-    // ── 2. Fetch COMMITTED dispatches (is_dispatched=true) — date-filtered ──
-    //   These represent shipments that have actually left the warehouse.
-    const dispatchP = this.supabase.client
+    // ── 2. Fetch ALL dispatch_events ─────────────────────────────────
+    //   Mobile's submitBlueDispatch only flips gg_invoices.is_dispatched
+    //   and leaves dispatch_events.is_dispatched untouched. So we can't
+    //   trust the event's own flag — we bucket by the parent invoice's
+    //   is_dispatched instead.
+    //
+    //   Includes invoice_number + customer_name so the expanded row can
+    //   show "who is holding this reservation".
+    const eventsP = this.supabase.client
       .from('dispatch_events')
-      .select('flavor_id, sku_id, batch_code, boxes_dispatched')
-      .eq('is_dispatched', true)
-      .gte('dispatch_date', from)
-      .lte('dispatch_date', to);
+      .select('flavor_id, sku_id, batch_code, boxes_dispatched, invoice_number, customer_name, dispatch_date, is_dispatched');
 
-    // ── 3. Fetch STAGED dispatches (is_dispatched=false) — current state ────
-    //   These are reservations: invoices that have been packed (web modal or
-    //   mobile pack flow) but not yet shipped. Not date-filtered because
-    //   reservations are a "right now" view independent of the report range.
-    //   Includes invoice_number + customer_name so the expanded row can show
-    //   "who is holding this reservation".
-    const reservedP = this.supabase.client
-      .from('dispatch_events')
-      .select('flavor_id, sku_id, batch_code, boxes_dispatched, invoice_number, customer_name')
-      .eq('is_dispatched', false);
+    // ── 3. Fetch invoice statuses ────────────────────────────────────
+    //   Source of truth for "is this invoice dispatched yet?".
+    const invoicesP = this.supabase.client
+      .from('gg_invoices')
+      .select('invoice_number, is_packed, is_dispatched');
 
-    const [{ data: sessions }, { data: dispatchEvents }, { data: stagedEvents }] =
-      await Promise.all([sessionsP, dispatchP, reservedP]);
+    const [{ data: sessions }, { data: allEvents }, { data: invoicesData }] =
+      await Promise.all([sessionsP, eventsP, invoicesP]);
 
-    // Build committed-dispatch maps
-    const dispatchedMap      = new Map<string, number>();
-    const batchDispatchedMap = new Map<string, number>();
-    for (const de of (dispatchEvents ?? []) as any[]) {
-      const fid: string = de.flavor_id ?? de.sku_id ?? '';
-      const bc: string  = de.batch_code ?? '';
-      const qty: number = Number(de.boxes_dispatched) || 0;
-      if (fid && qty > 0) {
-        dispatchedMap.set(fid, (dispatchedMap.get(fid) ?? 0) + qty);
-        if (bc) {
-          const key = `${fid}|${bc}`;
-          batchDispatchedMap.set(key, (batchDispatchedMap.get(key) ?? 0) + qty);
-        }
-      }
+    // Map invoice_number → status flags
+    const invoiceStatus = new Map<string, { is_packed: boolean; is_dispatched: boolean }>();
+    for (const inv of (invoicesData ?? []) as any[]) {
+      invoiceStatus.set(inv.invoice_number, {
+        is_packed: !!inv.is_packed,
+        is_dispatched: !!inv.is_dispatched,
+      });
     }
 
-    // Build reservation maps from staged dispatch_events (is_dispatched=false)
-    const reservedFlavorMap = new Map<string, number>();
-    const reservedBatchMap  = new Map<string, number>();
-    // Per-flavor breakdown by invoice (for the expanded row's "Reserved by invoice" sub-table)
+    // Walk every event once, bucket by its parent invoice's flags.
+    const dispatchedMap      = new Map<string, number>();
+    const batchDispatchedMap = new Map<string, number>();
+    const reservedFlavorMap  = new Map<string, number>();
+    const reservedBatchMap   = new Map<string, number>();
     const reservedInvoiceMap = new Map<string, Map<string, ReservedInvoice>>();
-    for (const ev of (stagedEvents ?? []) as any[]) {
+
+    for (const ev of (allEvents ?? []) as any[]) {
       const fid: string = ev.flavor_id ?? ev.sku_id ?? '';
       const bc:  string = ev.batch_code ?? '';
       const qty: number = Number(ev.boxes_dispatched) || 0;
       const inv: string = ev.invoice_number ?? '';
       const cust: string = ev.customer_name ?? '—';
+      const date: string = ev.dispatch_date ?? '';
       if (!fid || qty <= 0) continue;
-      reservedFlavorMap.set(fid, (reservedFlavorMap.get(fid) ?? 0) + qty);
-      if (bc) {
-        const key = `${fid}|${bc}`;
-        reservedBatchMap.set(key, (reservedBatchMap.get(key) ?? 0) + qty);
+
+      // Determine bucket: prefer parent invoice's flag; fall back to event's
+      // own flag for orphan events (D2C, mobile-only with no invoice row).
+      const status = inv ? invoiceStatus.get(inv) : undefined;
+      const isInvoiceDispatched = status ? status.is_dispatched : !!ev.is_dispatched;
+      const isInvoicePacked     = status ? status.is_packed     : true;
+
+      if (isInvoiceDispatched) {
+        // DISPATCHED: applies date filter (only events shipped in range).
+        if (date && date >= from && date <= to) {
+          dispatchedMap.set(fid, (dispatchedMap.get(fid) ?? 0) + qty);
+          if (bc) {
+            const key = `${fid}|${bc}`;
+            batchDispatchedMap.set(key, (batchDispatchedMap.get(key) ?? 0) + qty);
+          }
+        }
+        continue;
       }
-      if (inv) {
-        if (!reservedInvoiceMap.has(fid)) reservedInvoiceMap.set(fid, new Map());
-        const perFlavor = reservedInvoiceMap.get(fid)!;
-        const existing = perFlavor.get(inv);
-        if (existing) {
-          existing.boxes_reserved += qty;
-        } else {
-          perFlavor.set(inv, { invoice_number: inv, customer_name: cust, boxes_reserved: qty });
+
+      if (isInvoicePacked) {
+        // RESERVED: current-state, no date filter.
+        reservedFlavorMap.set(fid, (reservedFlavorMap.get(fid) ?? 0) + qty);
+        if (bc) {
+          const key = `${fid}|${bc}`;
+          reservedBatchMap.set(key, (reservedBatchMap.get(key) ?? 0) + qty);
+        }
+        if (inv) {
+          if (!reservedInvoiceMap.has(fid)) reservedInvoiceMap.set(fid, new Map());
+          const perFlavor = reservedInvoiceMap.get(fid)!;
+          const existing = perFlavor.get(inv);
+          if (existing) {
+            existing.boxes_reserved += qty;
+          } else {
+            perFlavor.set(inv, { invoice_number: inv, customer_name: cust, boxes_reserved: qty });
+          }
         }
       }
     }
