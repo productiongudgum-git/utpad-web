@@ -1,5 +1,6 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule, DecimalPipe } from '@angular/common';
+import { RealtimeChannel } from '@supabase/supabase-js';
 import { SupabaseService } from '../../../core/supabase.service';
 
 function fmtDate(d: Date): string {
@@ -181,8 +182,10 @@ interface FlavorGroup {
     </div>
   `,
 })
-export class InventoryComponent implements OnInit {
+export class InventoryComponent implements OnInit, OnDestroy {
   private readonly supabase = inject(SupabaseService);
+  private channel: RealtimeChannel | null = null;
+  private reloadDebounce: ReturnType<typeof setTimeout> | null = null;
 
   loading = signal(true);
   flavors = signal<FlavorGroup[]>([]);
@@ -209,6 +212,40 @@ export class InventoryComponent implements OnInit {
 
   async ngOnInit(): Promise<void> {
     await this.loadData();
+    this.subscribeRealtime();
+  }
+
+  ngOnDestroy(): void {
+    if (this.reloadDebounce) {
+      clearTimeout(this.reloadDebounce);
+      this.reloadDebounce = null;
+    }
+    if (this.channel) {
+      void this.supabase.client.removeChannel(this.channel);
+      this.channel = null;
+    }
+  }
+
+  /**
+   * Live updates: any change to dispatch_events or packing_sessions
+   * triggers a reload. Debounced 400ms so a burst of mobile dispatches
+   * (e.g. 4 line items all flipping at once) only reloads once.
+   */
+  private subscribeRealtime(): void {
+    this.channel = this.supabase.client
+      .channel('inventory-rt')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'dispatch_events' },  () => this.scheduleReload())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'packing_sessions' }, () => this.scheduleReload())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'gg_invoices' },       () => this.scheduleReload())
+      .subscribe();
+  }
+
+  private scheduleReload(): void {
+    if (this.reloadDebounce) clearTimeout(this.reloadDebounce);
+    this.reloadDebounce = setTimeout(() => {
+      this.reloadDebounce = null;
+      void this.loadData();
+    }, 400);
   }
 
   toggleExpand(flavorId: string): void {
