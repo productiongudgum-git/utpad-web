@@ -4,6 +4,7 @@ import { FormBuilder, ReactiveFormsModule, Validators, FormsModule } from '@angu
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { SupabaseService } from '../../../core/supabase.service';
 import { IngredientStockService } from '../../../core/services/ingredient-stock.service';
+import { formatStockString, toCanonical } from '../../../shared/utils/unit-format';
 
 interface Ingredient {
   id: string;
@@ -213,7 +214,7 @@ interface Ingredient {
                     <div style="display:flex;align-items:center;gap:8px;">
                       <span style="font-size:13px;font-weight:700;min-width:64px;"
                             [style.color]="stockColor(ing)">
-                        {{ ing.current_stock | number:'1.0-2' }} {{ ing.default_unit }}
+                        {{ fmtStock(ing.current_stock, ing.default_unit) }}
                       </span>
                       @if (ing.reorder_point > 0) {
                         <div style="flex:1;height:6px;border-radius:3px;background:#f3f4f6;min-width:60px;max-width:120px;overflow:hidden;">
@@ -442,9 +443,18 @@ export class IngredientsComponent implements OnInit {
     const v = this.form.getRawValue();
     const isEdit = this.editId();
     const normalizedName = v.name.trim();
-    const normalizedUnit = v.default_unit.trim();
-    const normalizedCurrentStock = Math.max(0, Number(v.current_stock) || 0);
-    const normalizedReorderPoint = Math.max(0, Number(v.reorder_point) || 0);
+    const formUnit = v.default_unit.trim();
+
+    // Phase 10 — convert to canonical units before persisting. The form
+    // accepts kg/L/g/ml/pcs/boxes but the DB stores only g/ml/pcs (boxes
+    // pass through). 5 kg input becomes 5000 g in the database.
+    const enteredStock  = Math.max(0, Number(v.current_stock) || 0);
+    const enteredReorder = Math.max(0, Number(v.reorder_point) || 0);
+    const canonicalStock  = toCanonical(enteredStock,  formUnit);
+    const canonicalReorder = toCanonical(enteredReorder, formUnit);
+    const normalizedUnit = canonicalStock.unit;
+    const normalizedCurrentStock = canonicalStock.qty;
+    const normalizedReorderPoint = canonicalReorder.qty;
 
     let ingredientId = isEdit;
     const duplicateError = await this.validateDuplicateIngredient(normalizedName, isEdit);
@@ -488,6 +498,11 @@ export class IngredientsComponent implements OnInit {
     await this.loadData();
     void this.stockSvc.refresh();
     this.saving.set(false);
+  }
+
+  /** Format canonical (qty, unit) for display. Switches g→kg, ml→L above 1000. */
+  fmtStock(qty: number, unit: string | null | undefined): string {
+    return formatStockString(qty, unit);
   }
 
   async deleteIngredient(id: string): Promise<void> {

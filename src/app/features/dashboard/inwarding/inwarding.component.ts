@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { SupabaseService } from '../../../core/supabase.service';
 import { WorkerDirectoryService } from '../../../core/services/worker-directory.service';
 import { InwardEvent } from '../../../shared/models/manufacturing.models';
+import { formatStock } from '../../../shared/utils/unit-format';
 
 @Component({
   selector: 'app-inwarding',
@@ -38,8 +39,8 @@ import { InwardEvent } from '../../../shared/models/manufacturing.models';
               @for (event of events(); track event.id) {
                 <tr class="hover:bg-gray-50" [class.bg-red-50]="isExpiringSoon(event.expiry_date)">
                   <td class="px-4 py-3 font-medium">{{ event.ingredient?.name ?? event.ingredient_id }}</td>
-                  <td class="px-4 py-3 text-right font-semibold">{{ event.qty }}</td>
-                  <td class="px-4 py-3 text-gray-500">{{ event.unit }}</td>
+                  <td class="px-4 py-3 text-right font-semibold">{{ displayQty(event.qty, event.unit) }}</td>
+                  <td class="px-4 py-3 text-gray-500">{{ displayUnit(event.qty, event.unit) }}</td>
                   <td class="px-4 py-3">{{ event.inward_date }}</td>
                   <td class="px-4 py-3 font-mono text-xs">{{ event.lot_ref ?? '—' }}</td>
                   <td class="px-4 py-3">{{ event.vendor?.name ?? '—' }}</td>
@@ -98,5 +99,16 @@ export class InwardingComponent implements OnInit {
   getWorkerLabel(workerId: string | null | undefined): string {
     if (!workerId) return '—';
     return this.workerMap()[workerId]?.name ?? workerId;
+  }
+
+  /** Display qty after auto-scaling (e.g. 40000 g → 40). */
+  displayQty(qty: number, unit: string | null | undefined): number {
+    const f = formatStock(qty, unit);
+    return Math.round(f.qty * 1000) / 1000;
+  }
+
+  /** Display unit after auto-scaling (e.g. g → kg when qty ≥ 1000). */
+  displayUnit(qty: number, unit: string | null | undefined): string {
+    return formatStock(qty, unit).unit;
   }
 }

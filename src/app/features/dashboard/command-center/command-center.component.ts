@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router';
 import { OperationsLiveService } from '../../../core/services/operations-live.service';
 import { BatchCodeService } from '../../../core/services/batch-code.service';
 import { IngredientStockService } from '../../../core/services/ingredient-stock.service';
+import { formatStockString } from '../../../shared/utils/unit-format';
 
 @Component({
   selector: 'app-command-center',
@@ -231,14 +232,14 @@ import { IngredientStockService } from '../../../core/services/ingredient-stock.
                         </div>
                       </div>
                       <p style="font-size:11px;color:#6B7280;margin:0;">
-                        {{ ing.current_stock | number:'1.0-2' }} {{ ing.default_unit }} in stock
-                        · threshold: {{ ing.reorder_point | number:'1.0-2' }} {{ ing.default_unit }}
+                        {{ fmtStock(ing.current_stock, ing.default_unit) }} in stock
+                        · threshold: {{ fmtStock(ing.reorder_point, ing.default_unit) }}
                       </p>
                     </div>
                     <div style="text-align:right;flex-shrink:0;">
                       <p style="font-size:13px;font-weight:700;margin:0 0 2px;"
                          [style.color]="ing.current_stock === 0 ? '#dc2626' : '#ea580c'">
-                        −{{ (ing.reorder_point - ing.current_stock) | number:'1.0-2' }} {{ ing.default_unit }}
+                        −{{ fmtStock(ing.reorder_point - ing.current_stock, ing.default_unit) }}
                       </p>
                       <p style="font-size:11px;color:#9CA3AF;margin:0;">deficit</p>
                     </div>
@@ -266,7 +267,7 @@ import { IngredientStockService } from '../../../core/services/ingredient-stock.
                   <span class="text-xs px-2 py-0.5 rounded bg-primary/10 text-primary">{{ event.module | titlecase }}</span>
                 </div>
                 <div class="text-xs text-text-sub-light dark:text-text-sub-dark mt-1">
-                  {{ event.workerName }} · Batch {{ event.batchCode }} · {{ event.quantity }} {{ event.unit }} · {{ event.createdAt | date:'mediumTime' }}
+                  {{ event.workerName }} · Batch {{ event.batchCode }} · {{ fmtStock(event.quantity, event.unit) }} · {{ event.createdAt | date:'mediumTime' }}
                 </div>
               </div>
             }
@@ -298,10 +299,15 @@ export class CommandCenterComponent {
   readonly alertSummaryLine = computed(() => {
     const items = this.stockSvc.lowStockIngredients();
     if (items.length === 0) return '';
-    const names = items.slice(0, 3).map(i => `${i.name} (${i.current_stock} ${i.default_unit})`);
+    const names = items.slice(0, 3).map(i => `${i.name} (${this.fmtStock(i.current_stock, i.default_unit)})`);
     const rest = items.length > 3 ? ` and ${items.length - 3} more` : '';
     return names.join(', ') + rest;
   });
+
+  /** Format a canonical (qty, unit) for display. Switches g→kg, ml→L above 1000. */
+  fmtStock(qty: number, unit: string | null | undefined): string {
+    return formatStockString(qty, unit);
+  }
 
   moduleBarWidth(value: number): number {
     return Math.max(8, (value / this.maxModuleCount()) * 100);
