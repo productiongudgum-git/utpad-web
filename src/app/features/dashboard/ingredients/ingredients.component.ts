@@ -4,7 +4,7 @@ import { FormBuilder, ReactiveFormsModule, Validators, FormsModule } from '@angu
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { SupabaseService } from '../../../core/supabase.service';
 import { IngredientStockService } from '../../../core/services/ingredient-stock.service';
-import { formatStockString, toCanonical } from '../../../shared/utils/unit-format';
+import { formatStock, formatStockString, toCanonical } from '../../../shared/utils/unit-format';
 
 interface Ingredient {
   id: string;
@@ -227,7 +227,7 @@ interface Ingredient {
                     </div>
                     @if (isLow(ing) && ing.reorder_point > 0) {
                       <p style="font-size:11px;color:#ea580c;margin:3px 0 0;">
-                        needs {{ (ing.reorder_point - ing.current_stock) | number:'1.0-2' }} {{ ing.default_unit }} more
+                        needs {{ fmtStock(ing.reorder_point - ing.current_stock, ing.default_unit) }} more
                       </p>
                     }
                   </td>
@@ -241,7 +241,7 @@ interface Ingredient {
                                (keydown.escape)="editingThresholdId.set(null)"
                                style="width:80px;padding:4px 8px;border:1px solid #01AC51;border-radius:6px;font-size:13px;outline:none;"
                                #threshInput>
-                        <span style="font-size:12px;color:#6B7280;">{{ ing.default_unit }}</span>
+                        <span style="font-size:12px;color:#6B7280;">{{ pendingThresholdUnit }}</span>
                         <button (click)="saveThreshold(ing)"
                                 style="border:none;background:#01AC51;color:#fff;border-radius:5px;padding:3px 8px;font-size:12px;font-weight:600;cursor:pointer;">✓</button>
                         <button (click)="editingThresholdId.set(null)"
@@ -252,7 +252,7 @@ interface Ingredient {
                         @if (ing.reorder_point > 0) {
                           <span style="font-size:13px;font-weight:600;"
                                 [style.color]="isLow(ing) ? '#ea580c' : '#6B7280'">
-                            {{ ing.reorder_point | number:'1.0-2' }} {{ ing.default_unit }}
+                            {{ fmtStock(ing.reorder_point, ing.default_unit) }}
                           </span>
                         } @else {
                           <span style="font-size:13px;color:#d1d5db;font-style:italic;">Not set</span>
@@ -318,6 +318,7 @@ export class IngredientsComponent implements OnInit {
   // Inline threshold editor
   editingThresholdId = signal<string | null>(null);
   pendingThreshold = 0;
+  pendingThresholdUnit = '';
 
   // Filters
   showLowStockOnly = signal(false);
@@ -386,22 +387,28 @@ export class IngredientsComponent implements OnInit {
 
   startThresholdEdit(ing: Ingredient): void {
     this.editingThresholdId.set(ing.id);
-    this.pendingThreshold = ing.reorder_point;
+    // Show the editor in the same auto-scaled unit as the display
+    // (e.g. 2000 g of reorder_point opens as "2" with label "kg").
+    const f = formatStock(ing.reorder_point, ing.default_unit);
+    this.pendingThreshold = f.qty;
+    this.pendingThresholdUnit = f.unit || ing.default_unit;
   }
 
   async saveThreshold(ing: Ingredient): Promise<void> {
-    const val = Math.max(0, Number(this.pendingThreshold) || 0);
+    const entered = Math.max(0, Number(this.pendingThreshold) || 0);
+    // Convert whatever unit the editor is showing back to canonical (g/ml/pcs).
+    const canonical = toCanonical(entered, this.pendingThresholdUnit);
     const { error } = await this.supabase.client
       .from('inventory_raw_materials')
       .upsert({
         ingredient_id: ing.id,
         current_qty: ing.current_stock,
         unit: ing.default_unit,
-        low_stock_threshold: val,
+        low_stock_threshold: canonical.qty,
       }, { onConflict: 'ingredient_id' });
     if (error) { this.showToast(error.message, 'error'); return; }
     this.editingThresholdId.set(null);
-    this.showToast(`Reorder point updated to ${val} ${ing.default_unit}`, 'success');
+    this.showToast(`Reorder point updated to ${entered} ${this.pendingThresholdUnit}`, 'success');
     await this.loadData();
     void this.stockSvc.refresh();
   }
