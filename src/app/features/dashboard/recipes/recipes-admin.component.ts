@@ -4,7 +4,11 @@ import { FormBuilder, ReactiveFormsModule, Validators, FormsModule } from '@angu
 import { SupabaseService } from '../../../core/supabase.service';
 import { SearchableSelectComponent, SearchableSelectOption } from '../../../shared/components/searchable-select.component';
 
-const UNITS = ['kg', 'g', 'L', 'ml', 'pcs'] as const;
+// Canonical units only (Phase 10). Recipe qty must be entered in grams
+// (or ml / pcs) so it matches gg_ingredients.current_stock and the API's
+// production deduction math. The previous kg / L options were removed
+// because mixed units would silently break production deduction.
+const UNITS = ['g', 'ml', 'pcs'] as const;
 
 interface BatchOption {
   units: number;
@@ -494,7 +498,7 @@ export class RecipesAdminComponent implements OnInit {
   // ── Ingredient lines ──────────────────────────────────────────────────
 
   addIngLine(): void {
-    this.ingLines.update(l => [...l, { ingredientId: '', ingredientName: '', quantity: 0, unit: 'kg' }]);
+    this.ingLines.update(l => [...l, { ingredientId: '', ingredientName: '', quantity: 0, unit: 'g' }]);
   }
 
   removeIngLine(i: number): void {
@@ -522,7 +526,7 @@ export class RecipesAdminComponent implements OnInit {
     this.selectedBatchUnits.set(7500);
     this.form.reset({ name: '', batch_size_kg: 15 });
     this.selectedFlavorId.set('');
-    this.ingLines.set([{ ingredientId: '', ingredientName: '', quantity: 0, unit: 'kg' }]);
+    this.ingLines.set([{ ingredientId: '', ingredientName: '', quantity: 0, unit: 'g' }]);
     this.formError.set('');
     this.showForm.set(true);
     setTimeout(() => document.querySelector('.recipe-form-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
@@ -537,7 +541,7 @@ export class RecipesAdminComponent implements OnInit {
     this.ingLines.set(
       r.ingredients.length > 0
         ? r.ingredients.map(i => ({ ingredientId: i.ingredient_id, ingredientName: i.name, quantity: i.quantity, unit: i.unit }))
-        : [{ ingredientId: '', ingredientName: '', quantity: 0, unit: 'kg' }]
+        : [{ ingredientId: '', ingredientName: '', quantity: 0, unit: 'g' }]
     );
     this.formError.set('');
     this.showForm.set(true);
@@ -676,7 +680,7 @@ export class RecipesAdminComponent implements OnInit {
       existing.push({
         ingredient_id: line.ingredient_id,
         quantity: Number(line.qty) || 0,
-        unit: ingredient?.default_unit ?? 'kg',
+        unit: ingredient?.default_unit ?? 'g',
       });
       linesByRecipeId.set(line.recipe_id, existing);
     });
