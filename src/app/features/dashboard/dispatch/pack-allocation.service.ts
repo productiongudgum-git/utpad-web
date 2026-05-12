@@ -139,20 +139,24 @@ export class PackAllocationService {
 
   /**
    * Persist the user's allocation by:
-   *   1. Looking up the invoice (need invoice_number + customer_name).
+   *   1. Looking up the invoice (need invoice_number, customer_name, items).
    *   2. Deleting any existing STAGED events for this invoice (idempotent —
    *      safe to re-pack; replaces previous reservation entirely).
    *   3. Inserting one staged event per allocated batch.
-   *   4. Flipping gg_invoices.is_packed = true.
+   *   4. Recomputing items[].packed_boxes from the resulting event set so
+   *      mobile's RED/YELLOW/BLUE classifier sees the right state and
+   *      doesn't re-pack the same invoice.
+   *   5. Setting is_packed = true only when EVERY flavor is fully packed
+   *      (matches mobile's "isPacked only when ALL flavors covered" rule).
    *
    * Committed events (is_dispatched=true) are never touched — those represent
    * real shipments that already left the warehouse.
    */
   async commitAllocation(invoiceId: string, allocations: FlavorAllocation[]): Promise<void> {
-    // 1. Get invoice metadata
+    // 1. Get invoice metadata + items
     const { data: invoice, error: invErr } = await this.supabase.client
       .from('gg_invoices')
-      .select('invoice_number, customer_name')
+      .select('invoice_number, customer_name, items')
       .eq('id', invoiceId)
       .maybeSingle();
 
@@ -161,9 +165,11 @@ export class PackAllocationService {
 
     const invoiceNumber = (invoice as any).invoice_number as string;
     const customerName  = (invoice as any).customer_name as string | null;
+    const itemsRaw      = (invoice as any).items;
+    const items: any[]  = Array.isArray(itemsRaw) ? itemsRaw : [];
     const today = new Date().toISOString().slice(0, 10);
 
-    // 2. Wipe existing staged events for this invoice (replaces any prior reservation)
+    // 2. Wipe existing staged events for this invoice
     const { error: delErr } = await this.supabase.client
       .from('dispatch_events')
       .delete()
@@ -179,10 +185,10 @@ export class PackAllocationService {
         .map((b) => ({
           invoice_number:   invoiceNumber,
           flavor_id:        fa.flavor_id,
-          sku_id:           fa.flavor_id, // schema mirrors flavor_id as sku_id
+          sku_id:           fa.flavor_id,
           batch_code:       b.batch_code,
           boxes_dispatched: Number(b.boxes_to_take),
-          is_dispatched:    false,        // staged — not yet shipped
+          is_dispatched:    false,
           customer_name:    customerName,
           dispatch_date:    today,
           worker_id:        null,
@@ -196,13 +202,54 @@ export class PackAllocationService {
       if (insErr) throw new Error(`insert staged events: ${insErr.message}`);
     }
 
-    // 4. Flip is_packed
+    // 4. Recompute packed_boxes per flavor from ALL events (staged + committed)
+    const { newItems, allFullyPacked } = await this.recomputeInvoiceItems(invoiceNumber, items);
+
+    // 5. Update invoice with refreshed items + is_packed flag
     const { error: updErr } = await this.supabase.client
       .from('gg_invoices')
-      .update({ is_packed: true })
+      .update({ items: newItems, is_packed: allFullyPacked })
       .eq('id', invoiceId);
 
-    if (updErr) throw new Error(`mark packed: ${updErr.message}`);
+    if (updErr) throw new Error(`update invoice: ${updErr.message}`);
+  }
+
+  /**
+   * Helper: query all dispatch_events for an invoice and recompute
+   * `items[].packed_boxes` for each line item. Also returns whether
+   * every line item is fully packed (drives the is_packed flag).
+   */
+  private async recomputeInvoiceItems(
+    invoiceNumber: string,
+    items: any[]
+  ): Promise<{ newItems: any[]; allFullyPacked: boolean }> {
+    const { data: allEvents, error } = await this.supabase.client
+      .from('dispatch_events')
+      .select('flavor_id, boxes_dispatched')
+      .eq('invoice_number', invoiceNumber);
+
+    if (error) throw new Error(`recount events: ${error.message}`);
+
+    const packedPerFlavor = new Map<string, number>();
+    for (const ev of (allEvents ?? []) as any[]) {
+      const fid = String(ev.flavor_id ?? '');
+      const qty = Number(ev.boxes_dispatched) || 0;
+      if (!fid || qty <= 0) continue;
+      packedPerFlavor.set(fid, (packedPerFlavor.get(fid) ?? 0) + qty);
+    }
+
+    const newItems = items.map((it: any) => ({
+      ...it,
+      packed_boxes: packedPerFlavor.get(String(it.flavor_id)) ?? 0,
+    }));
+
+    const allFullyPacked = newItems.length > 0 && newItems.every((it) => {
+      const needed = Number(it.quantity_boxes) || 0;
+      const packed = Number(it.packed_boxes) || 0;
+      return needed === 0 || packed >= needed;
+    });
+
+    return { newItems, allFullyPacked };
   }
 
   // ──────────────────────────────────────────────────────────────────
@@ -211,15 +258,14 @@ export class PackAllocationService {
 
   /**
    * Releases the FIFO reservation: deletes only the STAGED dispatch_events
-   * for this invoice (committed shipments are kept) and flips is_packed=false.
-   *
-   * If the invoice had been partially shipped, the staged portion goes back
-   * to the available pool; the committed portion stays "out of the warehouse".
+   * for this invoice (committed shipments are kept). Also recomputes
+   * items[].packed_boxes against the remaining events so mobile sees the
+   * post-release state correctly.
    */
   async releaseAllocation(invoiceId: string): Promise<void> {
     const { data: invoice, error: invErr } = await this.supabase.client
       .from('gg_invoices')
-      .select('invoice_number')
+      .select('invoice_number, items')
       .eq('id', invoiceId)
       .maybeSingle();
 
@@ -227,6 +273,8 @@ export class PackAllocationService {
     if (!invoice) throw new Error('Invoice not found');
 
     const invoiceNumber = (invoice as any).invoice_number as string;
+    const itemsRaw      = (invoice as any).items;
+    const items: any[]  = Array.isArray(itemsRaw) ? itemsRaw : [];
 
     const { error: delErr } = await this.supabase.client
       .from('dispatch_events')
@@ -236,11 +284,13 @@ export class PackAllocationService {
 
     if (delErr) throw new Error(`clear staged events: ${delErr.message}`);
 
+    const { newItems, allFullyPacked } = await this.recomputeInvoiceItems(invoiceNumber, items);
+
     const { error: updErr } = await this.supabase.client
       .from('gg_invoices')
-      .update({ is_packed: false })
+      .update({ items: newItems, is_packed: allFullyPacked })
       .eq('id', invoiceId);
 
-    if (updErr) throw new Error(`mark unpacked: ${updErr.message}`);
+    if (updErr) throw new Error(`update invoice: ${updErr.message}`);
   }
 }

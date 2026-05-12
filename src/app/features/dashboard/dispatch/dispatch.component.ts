@@ -163,12 +163,21 @@ export class DispatchComponent implements OnInit {
     }
 
     this.rows.set((data ?? []).map((d: any) => {
+      // items here represent REMAINING boxes to pack per flavor, i.e.
+      //   remaining = quantity_boxes − packed_boxes
+      // Flavors already at quota are filtered out so the pack modal won't
+      // allocate against them (preventing over-allocation when re-packing).
       const items: InvoiceLineItem[] = Array.isArray(d.items)
-        ? d.items.map((it: any) => ({
-            flavor_id: String(it.flavor_id ?? ''),
-            flavor_name: String(it.flavor_name ?? ''),
-            quantity_boxes: Number(it.quantity_boxes) || 0,
-          })).filter((it: InvoiceLineItem) => it.flavor_id && it.quantity_boxes > 0)
+        ? d.items.map((it: any) => {
+            const quantity  = Number(it.quantity_boxes) || 0;
+            const packed    = Number(it.packed_boxes)   || 0;
+            const remaining = Math.max(0, quantity - packed);
+            return {
+              flavor_id: String(it.flavor_id ?? ''),
+              flavor_name: String(it.flavor_name ?? ''),
+              quantity_boxes: remaining,
+            };
+          }).filter((it: InvoiceLineItem) => it.flavor_id && it.quantity_boxes > 0)
         : [];
 
       return {
