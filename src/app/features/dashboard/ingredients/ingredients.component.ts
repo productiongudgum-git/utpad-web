@@ -8,8 +8,12 @@ import { formatStock, formatStockString, toCanonical } from '../../../shared/uti
 
 // "Batches left" tuning — how many more batches the current stock can make,
 // based purely on recipe usage (no production-pace assumption).
-//   LOW_BATCHES — flag an ingredient when fewer than this many batches remain
-const LOW_BATCHES = 10;
+// The low threshold depends on how broadly the ingredient is used: a base
+// ingredient in most/all recipes burns down across every flavour, so it's
+// flagged earlier (more lead time) than a flavour-specific one.
+const LOW_BATCHES_SHARED     = 40;   // used in >= half of all recipes (base ingredient)
+const LOW_BATCHES_DEFAULT    = 15;   // used in fewer recipes (flavour-specific etc.)
+const SHARED_RECIPE_FRACTION = 0.5;  // "used in most recipes" cutoff
 
 interface Ingredient {
   id: string;
@@ -22,6 +26,9 @@ interface Ingredient {
   avgPerBatch: number;          // avg canonical qty used per batch across recipes
   batchesLeft: number | null;   // floor(current_stock / avgPerBatch); null = unused
   recipeCount: number;          // how many recipes use this ingredient
+  totalRecipes: number;         // total recipes in the system (for context)
+  shared: boolean;              // used in >= half of recipes → base ingredient
+  lowThreshold: number;         // batches below which it flags red
 }
 
 @Component({
@@ -244,9 +251,15 @@ interface Ingredient {
 
                   <!-- Batches left (recipe-based) -->
                   <td style="padding:12px 12px;">
-                    <span style="font-size:13px;font-weight:700;" [style.color]="batchesColor(ing)" [title]="usageTooltip(ing)">
-                      {{ batchesLabel(ing) }}
-                    </span>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <span style="font-size:13px;font-weight:700;" [style.color]="batchesColor(ing)" [title]="usageTooltip(ing)">
+                        {{ batchesLabel(ing) }}
+                      </span>
+                      @if (ing.shared) {
+                        <span style="font-size:10px;font-weight:600;background:#f3f4f6;color:#6B7280;border-radius:4px;padding:1px 5px;"
+                              [title]="'Base ingredient — used in ' + ing.recipeCount + ' of ' + ing.totalRecipes + ' recipes; flags red below ' + ing.lowThreshold + ' batches'">base</span>
+                      }
+                    </div>
                     @if (ing.avgPerBatch > 0) {
                       <p style="font-size:11px;color:#9CA3AF;margin:3px 0 0;">
                         ≈ {{ fmtStock(ing.avgPerBatch, ing.default_unit) }}/batch{{ ing.recipeCount > 1 ? ' avg' : '' }}
@@ -407,17 +420,13 @@ export class IngredientsComponent implements OnInit {
 
   // ── Batches left ──────────────────────────────────────────────────────
 
-  readonly LOW_BATCHES = LOW_BATCHES;
-
   isLowBatches(ing: Ingredient): boolean {
-    return ing.batchesLeft != null && ing.batchesLeft < LOW_BATCHES;
+    return ing.batchesLeft != null && ing.batchesLeft < ing.lowThreshold;
   }
 
   batchesColor(ing: Ingredient): string {
     if (ing.batchesLeft == null) return '#9CA3AF';
-    if (ing.batchesLeft < 3) return '#dc2626';
-    if (ing.batchesLeft < LOW_BATCHES) return '#ea580c';
-    return '#16a34a';
+    return ing.batchesLeft < ing.lowThreshold ? '#dc2626' : '#16a34a';
   }
 
   batchesLabel(ing: Ingredient): string {
@@ -429,7 +438,10 @@ export class IngredientsComponent implements OnInit {
   usageTooltip(ing: Ingredient): string {
     if (ing.batchesLeft == null) return 'Not used in any recipe yet';
     const across = ing.recipeCount > 1 ? ` (avg across ${ing.recipeCount} recipes)` : '';
-    return `${this.fmtStock(ing.avgPerBatch, ing.default_unit)} per batch${across}`;
+    const tier = ing.shared
+      ? `base ingredient — used in ${ing.recipeCount} of ${ing.totalRecipes} recipes; flags red below ${ing.lowThreshold} batches`
+      : `flags red below ${ing.lowThreshold} batches`;
+    return `${this.fmtStock(ing.avgPerBatch, ing.default_unit)} per batch${across}. ${tier}.`;
   }
 
   // ── Inline threshold editor ───────────────────────────────────────────
@@ -594,7 +606,7 @@ export class IngredientsComponent implements OnInit {
         .select('ingredient_id, gg_vendors(name)'),
       this.supabase.client
         .from('recipe_lines')
-        .select('ingredient_id, qty'),
+        .select('recipe_id, ingredient_id, qty'),
     ]);
 
     const inventoryMap = new Map<string, any>();
@@ -610,13 +622,16 @@ export class IngredientsComponent implements OnInit {
     // it. A flavour-specific ingredient (one recipe) is exact; a shared base
     // ingredient is the mean across its recipes.
     const usageByIng = new Map<string, { sum: number; count: number }>();
+    const allRecipeIds = new Set<string>();
     (recipeLines ?? []).forEach((l: any) => {
+      if (l.recipe_id) allRecipeIds.add(l.recipe_id);
       const qty = Number(l.qty) || 0;
       if (qty <= 0) return;
       const e = usageByIng.get(l.ingredient_id) ?? { sum: 0, count: 0 };
       e.sum += qty; e.count += 1;
       usageByIng.set(l.ingredient_id, e);
     });
+    const totalRecipes = allRecipeIds.size;
 
     this.ingredients.set((ings ?? []).map((i: any) => {
       const currentStock = inventoryMap.get(i.id)?.current_qty ?? 0;
@@ -624,6 +639,11 @@ export class IngredientsComponent implements OnInit {
       const recipeCount = u?.count ?? 0;
       const avgPerBatch = u && u.count > 0 ? u.sum / u.count : 0;
       const batchesLeft = avgPerBatch > 0 ? Math.floor(currentStock / avgPerBatch) : null;
+
+      // A base ingredient (used in most/all recipes) gets the higher low
+      // threshold so it's flagged with more lead time.
+      const shared = totalRecipes > 0 && recipeCount / totalRecipes >= SHARED_RECIPE_FRACTION;
+      const lowThreshold = shared ? LOW_BATCHES_SHARED : LOW_BATCHES_DEFAULT;
 
       return {
         id: i.id, name: i.name,
@@ -634,6 +654,9 @@ export class IngredientsComponent implements OnInit {
         avgPerBatch,
         batchesLeft,
         recipeCount,
+        totalRecipes,
+        shared,
+        lowThreshold,
       };
     }));
     this.loading.set(false);
