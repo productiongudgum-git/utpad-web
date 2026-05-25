@@ -6,6 +6,14 @@ import { SupabaseService } from '../../../core/supabase.service';
 import { IngredientStockService } from '../../../core/services/ingredient-stock.service';
 import { formatStock, formatStockString, toCanonical } from '../../../shared/utils/unit-format';
 
+// "Days of cover" tuning.
+//   TRAILING_DAYS        — window of real production used to measure burn rate
+//   BATCHES_PER_DAY_EST  — fallback pace when there's no recent production yet
+//   LOW_DAYS             — flag an ingredient when it has fewer days left
+const TRAILING_DAYS       = 7;
+const BATCHES_PER_DAY_EST = 2.5;
+const LOW_DAYS            = 7;
+
 interface Ingredient {
   id: string;
   name: string;
@@ -13,6 +21,10 @@ interface Ingredient {
   reorder_point: number;
   current_stock: number;
   vendor_names: string[];
+  // Forecasting (canonical units: grams/ml/pcs per day).
+  dailyUsage: number;                       // estimated consumption per day
+  daysOfCover: number | null;               // current_stock / dailyUsage; null = not consumed
+  usageBasis: 'actual' | 'estimate' | 'none';
 }
 
 @Component({
@@ -183,6 +195,7 @@ interface Ingredient {
               <tr style="background:#f8f9fa;border-bottom:1px solid var(--border);">
                 <th style="text-align:left;padding:11px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Ingredient</th>
                 <th style="text-align:left;padding:11px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;min-width:160px;">Current Stock</th>
+                <th style="text-align:left;padding:11px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Days of Cover</th>
                 <th style="text-align:left;padding:11px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Reorder Point</th>
                 <th style="text-align:left;padding:11px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Vendors</th>
                 <th style="text-align:center;padding:11px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Actions</th>
@@ -191,7 +204,7 @@ interface Ingredient {
             <tbody>
               @for (ing of filteredIngredients(); track ing.id) {
                 <tr style="border-bottom:1px solid #f3f4f6;transition:background 0.1s;"
-                    [style.background]="isLow(ing) ? '#fff7ed' : 'transparent'">
+                    [style.background]="(isLow(ing) || isLowDays(ing)) ? '#fff7ed' : 'transparent'">
 
                   <!-- Name -->
                   <td style="padding:12px 16px;">
@@ -229,6 +242,22 @@ interface Ingredient {
                       <p style="font-size:11px;color:#ea580c;margin:3px 0 0;">
                         needs {{ fmtStock(ing.reorder_point - ing.current_stock, ing.default_unit) }} more
                       </p>
+                    }
+                  </td>
+
+                  <!-- Days of cover (trailing usage) -->
+                  <td style="padding:12px 12px;">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <span style="font-size:13px;font-weight:700;" [style.color]="daysColor(ing)" [title]="usageTooltip(ing)">
+                        {{ daysLabel(ing) }}
+                      </span>
+                      @if (ing.usageBasis === 'estimate') {
+                        <span style="font-size:10px;font-weight:600;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;padding:1px 5px;"
+                              title="No production in the last 7 days — estimated at 2.5 batches/day">est</span>
+                      }
+                    </div>
+                    @if (ing.dailyUsage > 0) {
+                      <p style="font-size:11px;color:#9CA3AF;margin:3px 0 0;">≈ {{ fmtStock(ing.dailyUsage, ing.default_unit) }}/day</p>
                     }
                   </td>
 
@@ -383,6 +412,36 @@ export class IngredientsComponent implements OnInit {
     return Math.min(100, (ing.current_stock / (ing.reorder_point * 2)) * 100);
   }
 
+  // ── Days of cover ─────────────────────────────────────────────────────
+
+  readonly LOW_DAYS = LOW_DAYS;
+
+  isLowDays(ing: Ingredient): boolean {
+    return ing.daysOfCover != null && ing.daysOfCover < LOW_DAYS;
+  }
+
+  daysColor(ing: Ingredient): string {
+    if (ing.daysOfCover == null) return '#9CA3AF';
+    if (ing.daysOfCover < 3) return '#dc2626';
+    if (ing.daysOfCover < LOW_DAYS) return '#ea580c';
+    return '#16a34a';
+  }
+
+  daysLabel(ing: Ingredient): string {
+    if (ing.daysOfCover == null) return '—';
+    const d = ing.daysOfCover;
+    if (d >= 100) return '100+ days';
+    return `${d.toFixed(d < 10 ? 1 : 0)} days`;
+  }
+
+  usageTooltip(ing: Ingredient): string {
+    if (ing.daysOfCover == null) return 'Not used in any recipe yet';
+    const basis = ing.usageBasis === 'actual'
+      ? `actual usage, last ${TRAILING_DAYS} days`
+      : `estimated ${BATCHES_PER_DAY_EST} batches/day`;
+    return `${this.fmtStock(ing.dailyUsage, ing.default_unit)}/day (${basis})`;
+  }
+
   // ── Inline threshold editor ───────────────────────────────────────────
 
   startThresholdEdit(ing: Ingredient): void {
@@ -526,7 +585,19 @@ export class IngredientsComponent implements OnInit {
 
   private async loadData(): Promise<void> {
     this.loading.set(true);
-    const [{ data: ings }, { data: inventory }, { data: vi }] = await Promise.all([
+
+    const cutoff = new Date(Date.now() - TRAILING_DAYS * 86400000)
+      .toISOString()
+      .substring(0, 10);
+
+    const [
+      { data: ings },
+      { data: inventory },
+      { data: vi },
+      { data: batches },
+      { data: recipeLines },
+      { data: recipes },
+    ] = await Promise.all([
       this.supabase.client
         .from('gg_ingredients')
         .select('id, name, default_unit')
@@ -537,6 +608,16 @@ export class IngredientsComponent implements OnInit {
       this.supabase.client
         .from('gg_vendor_ingredients')
         .select('ingredient_id, gg_vendors(name)'),
+      this.supabase.client
+        .from('production_batches')
+        .select('recipe_id, flavor_id, production_date')
+        .gte('production_date', cutoff),
+      this.supabase.client
+        .from('recipe_lines')
+        .select('recipe_id, ingredient_id, qty'),
+      this.supabase.client
+        .from('gg_recipes')
+        .select('id, flavor_id'),
     ]);
 
     const inventoryMap = new Map<string, any>();
@@ -548,13 +629,64 @@ export class IngredientsComponent implements OnInit {
       if (row.gg_vendors?.name) vendorMap.get(row.ingredient_id)!.push(row.gg_vendors.name);
     });
 
-    this.ingredients.set((ings ?? []).map((i: any) => ({
-      id: i.id, name: i.name,
-      default_unit: inventoryMap.get(i.id)?.unit ?? i.default_unit ?? 'kg',
-      reorder_point: inventoryMap.get(i.id)?.low_stock_threshold ?? 0,
-      current_stock: inventoryMap.get(i.id)?.current_qty ?? 0,
-      vendor_names: vendorMap.get(i.id) ?? [],
-    })));
+    // Per-recipe ingredient usage (grams per batch), plus a forward estimate
+    // of each ingredient's typical per-batch amount (mean across the recipes
+    // that use it) for the no-history fallback.
+    const linesByRecipe = new Map<string, Array<{ ingredient_id: string; qty: number }>>();
+    const estByIng = new Map<string, { sum: number; count: number }>();
+    (recipeLines ?? []).forEach((l: any) => {
+      const qty = Number(l.qty) || 0;
+      const arr = linesByRecipe.get(l.recipe_id) ?? [];
+      arr.push({ ingredient_id: l.ingredient_id, qty });
+      linesByRecipe.set(l.recipe_id, arr);
+      const e = estByIng.get(l.ingredient_id) ?? { sum: 0, count: 0 };
+      e.sum += qty; e.count += 1;
+      estByIng.set(l.ingredient_id, e);
+    });
+
+    // Fallback recipe per flavor, for batches that didn't record recipe_id.
+    const recipeByFlavor = new Map<string, string>();
+    (recipes ?? []).forEach((r: any) => {
+      if (r.flavor_id && !recipeByFlavor.has(r.flavor_id)) recipeByFlavor.set(r.flavor_id, r.id);
+    });
+
+    // Sum actual consumption over the trailing window from real batches.
+    const consumed = new Map<string, number>();
+    (batches ?? []).forEach((b: any) => {
+      const recipeId = b.recipe_id ?? recipeByFlavor.get(b.flavor_id);
+      if (!recipeId) return;
+      for (const line of linesByRecipe.get(recipeId) ?? []) {
+        consumed.set(line.ingredient_id, (consumed.get(line.ingredient_id) ?? 0) + line.qty);
+      }
+    });
+
+    this.ingredients.set((ings ?? []).map((i: any) => {
+      const currentStock = inventoryMap.get(i.id)?.current_qty ?? 0;
+
+      // Daily usage: prefer real trailing consumption; fall back to a
+      // 2.5-batch/day estimate against this ingredient's average recipe amount.
+      const actualDaily = (consumed.get(i.id) ?? 0) / TRAILING_DAYS;
+      const est = estByIng.get(i.id);
+      const estDaily = est && est.count > 0 ? (est.sum / est.count) * BATCHES_PER_DAY_EST : 0;
+
+      let dailyUsage = 0;
+      let usageBasis: Ingredient['usageBasis'] = 'none';
+      if (actualDaily > 0)   { dailyUsage = actualDaily; usageBasis = 'actual'; }
+      else if (estDaily > 0) { dailyUsage = estDaily;    usageBasis = 'estimate'; }
+
+      const daysOfCover = dailyUsage > 0 ? currentStock / dailyUsage : null;
+
+      return {
+        id: i.id, name: i.name,
+        default_unit: inventoryMap.get(i.id)?.unit ?? i.default_unit ?? 'kg',
+        reorder_point: inventoryMap.get(i.id)?.low_stock_threshold ?? 0,
+        current_stock: currentStock,
+        vendor_names: vendorMap.get(i.id) ?? [],
+        dailyUsage,
+        daysOfCover,
+        usageBasis,
+      };
+    }));
     this.loading.set(false);
   }
 
