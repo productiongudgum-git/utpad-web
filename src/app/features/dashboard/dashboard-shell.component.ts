@@ -117,7 +117,10 @@ export class DashboardShellComponent {
     { label: 'Dashboard',   icon: 'dashboard',              route: 'home' },
     { label: 'Live Kanban', icon: 'view_kanban',             route: 'kanban' },
     { label: 'Recipes',     icon: 'science',                 route: 'recipes' },
-    { label: 'Flavors',     icon: 'local_dining',            route: 'flavors' },
+    // Flavors are the SKU behind each recipe — auto-created by the recipe
+    // import and kept 1:1 with recipes. Hidden from nav so no one hand-creates
+    // stray duplicate flavors. The /flavors route still works via direct URL
+    // if you ever need to inspect or clean up.
     { label: 'Inventory',   icon: 'inventory_2',             route: 'inventory' },
     { label: 'Ingredients', icon: 'category',                route: 'ingredients' },
     { label: 'Team',        icon: 'group',                   route: 'team' },
