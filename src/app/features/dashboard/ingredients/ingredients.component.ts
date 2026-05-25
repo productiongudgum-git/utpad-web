@@ -198,8 +198,22 @@ interface Ingredient {
             <thead>
               <tr style="background:#f8f9fa;border-bottom:1px solid var(--border);">
                 <th style="text-align:left;padding:11px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Ingredient</th>
-                <th style="text-align:left;padding:11px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;min-width:160px;">Current Stock</th>
-                <th style="text-align:left;padding:11px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Batches Left</th>
+                <th style="text-align:left;padding:11px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;min-width:160px;">
+                  <span (click)="cycleSort('stock')" title="Sort by current stock"
+                        style="display:inline-flex;align-items:center;gap:3px;cursor:pointer;user-select:none;">
+                    Current Stock
+                    <span class="material-icons-round" style="font-size:14px;"
+                          [style.color]="sortActive('stock') ? '#01AC51' : '#9CA3AF'">{{ sortIcon('stock') }}</span>
+                  </span>
+                </th>
+                <th style="text-align:left;padding:11px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">
+                  <span (click)="cycleSort('batches')" title="Sort by batches left"
+                        style="display:inline-flex;align-items:center;gap:3px;cursor:pointer;user-select:none;">
+                    Batches Left
+                    <span class="material-icons-round" style="font-size:14px;"
+                          [style.color]="sortActive('batches') ? '#01AC51' : '#9CA3AF'">{{ sortIcon('batches') }}</span>
+                  </span>
+                </th>
                 <th style="text-align:left;padding:11px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Reorder Point</th>
                 <th style="text-align:left;padding:11px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Vendors</th>
                 <th style="text-align:center;padding:11px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Actions</th>
@@ -360,11 +374,24 @@ export class IngredientsComponent implements OnInit {
   rawSearch = '';
   searchSig = signal('');
 
+  // Sorting for Current Stock / Batches Left. null key = normal (name) order.
+  sortKey = signal<'stock' | 'batches' | null>(null);
+  sortDir = signal<'asc' | 'desc'>('asc');
+
   readonly filteredIngredients = computed(() => {
     let list = this.ingredients();
     const q = this.searchSig().toLowerCase().trim();
     if (q) list = list.filter(i => i.name.toLowerCase().includes(q));
     if (this.showLowStockOnly()) list = list.filter(i => this.isLow(i));
+
+    const key = this.sortKey();
+    if (key) {
+      const dir = this.sortDir() === 'asc' ? 1 : -1;
+      // Unused ingredients (no batches figure) always sort to the bottom.
+      const val = (i: Ingredient) =>
+        key === 'stock' ? i.current_stock : (i.batchesLeft == null ? Infinity : i.batchesLeft);
+      list = [...list].sort((a, b) => (val(a) - val(b)) * dir);
+    }
     return list;
   });
 
@@ -396,6 +423,30 @@ export class IngredientsComponent implements OnInit {
 
   toggleLowStockFilter(): void {
     this.showLowStockOnly.update(v => !v);
+  }
+
+  // ── Sorting ───────────────────────────────────────────────────────────
+  // Each click cycles a column: ascending → descending → normal (name order).
+
+  cycleSort(key: 'stock' | 'batches'): void {
+    if (this.sortKey() !== key) {
+      this.sortKey.set(key);
+      this.sortDir.set('asc');
+    } else if (this.sortDir() === 'asc') {
+      this.sortDir.set('desc');
+    } else {
+      this.sortKey.set(null);
+      this.sortDir.set('asc');
+    }
+  }
+
+  sortIcon(key: 'stock' | 'batches'): string {
+    if (this.sortKey() !== key) return 'unfold_more';
+    return this.sortDir() === 'asc' ? 'arrow_upward' : 'arrow_downward';
+  }
+
+  sortActive(key: 'stock' | 'batches'): boolean {
+    return this.sortKey() === key;
   }
 
   // ── Stock helpers ─────────────────────────────────────────────────────
