@@ -1,0 +1,240 @@
+import { Injectable, inject } from '@angular/core';
+import * as Papa from 'papaparse';
+import { SupabaseService } from '../../../core/supabase.service';
+
+/**
+ * Recipe importer for the transposed wide-format master sheet.
+ *
+ *   Row 0  : ["Ingredients / Flavor", <Flavor A>, <Flavor B>, ...]
+ *   Row 1+ : [<Ingredient name>,       <qty A>,    <qty B>,    ...]
+ *   Footer : a row like "ALL QTY AS PER 7500 PCS" (ignored)
+ *
+ * Cell values are grams, calibrated for a 7500-piece batch. Empty cell =
+ * that ingredient isn't used in that flavor.
+ *
+ * Rules (confirmed with the user):
+ *   - Missing flavors are created in gg_flavors.
+ *   - Missing ingredients are created in gg_ingredients (default_unit 'g').
+ *   - The ingredient row literally named "Flavour" becomes a per-flavor
+ *     ingredient: "<Flavor> Flavour" (e.g. "Strawberry Flavour").
+ *   - Each flavor gets one recipe; batch_size_kg = sum of its grams / 1000.
+ *
+ * All values stay in the browser — only resolved IDs + numbers are written
+ * to Supabase. The raw file never leaves the device.
+ */
+
+const BATCH_PCS = 7500;
+const FLAVOUR_ROW = 'flavour'; // the generic row that expands per flavor
+
+export interface ParsedCell {
+  flavorName: string;
+  ingredientName: string;   // already expanded ("Strawberry Flavour")
+  qty: number;              // grams
+}
+
+export interface RecipePreview {
+  flavorNames: string[];
+  ingredientNames: string[];          // distinct, expanded
+  cells: ParsedCell[];
+  newFlavors: string[];
+  newIngredients: string[];
+  recipeCount: number;
+  lineCount: number;
+  /** per-flavor total grams → batch_size_kg */
+  batchKgByFlavor: Record<string, number>;
+  warnings: string[];
+}
+
+export interface ImportResult {
+  flavorsCreated: number;
+  ingredientsCreated: number;
+  recipesCreated: number;
+  linesCreated: number;
+  errors: string[];
+}
+
+interface Catalogs {
+  flavors: { id: string; name: string }[];
+  ingredients: { id: string; name: string }[];
+}
+
+@Injectable({ providedIn: 'root' })
+export class RecipeImportService {
+  private readonly supabase = inject(SupabaseService);
+
+  // ── Parse ───────────────────────────────────────────────────────────
+
+  parseCsv(file: File): Promise<string[][]> {
+    return new Promise((resolve, reject) => {
+      Papa.parse<string[]>(file, {
+        header: false,
+        skipEmptyLines: 'greedy',
+        complete: (res) => resolve(res.data as string[][]),
+        error: (err) => reject(err),
+      });
+    });
+  }
+
+  /**
+   * Turn the raw grid into a flat list of (flavor, ingredient, qty) cells.
+   * Applies the "Flavour" → per-flavor expansion.
+   */
+  parseGrid(rows: string[][]): ParsedCell[] {
+    if (rows.length === 0) return [];
+    const header = rows[0].map((c) => (c ?? '').trim());
+    const flavorNames = header.slice(1).map((c) => c.trim());
+
+    const cells: ParsedCell[] = [];
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r];
+      const rawName = (row[0] ?? '').trim();
+      if (!rawName) continue;
+      // Skip footer-style rows ("ALL QTY AS PER 7500 PCS")
+      if (/qty\s+as\s+per/i.test(rawName)) continue;
+
+      for (let c = 1; c < header.length; c++) {
+        const flavorName = flavorNames[c - 1];
+        if (!flavorName) continue;
+        const qty = Number((row[c] ?? '').toString().replace(/,/g, '').trim());
+        if (!Number.isFinite(qty) || qty <= 0) continue;
+
+        const ingredientName =
+          rawName.toLowerCase() === FLAVOUR_ROW ? `${flavorName} Flavour` : rawName;
+
+        cells.push({ flavorName, ingredientName, qty });
+      }
+    }
+    return cells;
+  }
+
+  // ── Resolve + preview ───────────────────────────────────────────────
+
+  async loadCatalogs(): Promise<Catalogs> {
+    const [flavorsRes, ingredientsRes] = await Promise.all([
+      this.supabase.client.from('gg_flavors').select('id, name'),
+      this.supabase.client.from('gg_ingredients').select('id, name'),
+    ]);
+    return {
+      flavors: (flavorsRes.data ?? []) as Catalogs['flavors'],
+      ingredients: (ingredientsRes.data ?? []) as Catalogs['ingredients'],
+    };
+  }
+
+  buildPreview(cells: ParsedCell[], catalogs: Catalogs): RecipePreview {
+    const norm = (s: string) => s.trim().toLowerCase();
+    const existingFlavors = new Set(catalogs.flavors.map((f) => norm(f.name)));
+    const existingIngredients = new Set(catalogs.ingredients.map((i) => norm(i.name)));
+
+    const flavorNames = Array.from(new Set(cells.map((c) => c.flavorName)));
+    const ingredientNames = Array.from(new Set(cells.map((c) => c.ingredientName)));
+
+    const newFlavors = flavorNames.filter((f) => !existingFlavors.has(norm(f)));
+    const newIngredients = ingredientNames.filter((i) => !existingIngredients.has(norm(i)));
+
+    const batchKgByFlavor: Record<string, number> = {};
+    for (const c of cells) {
+      batchKgByFlavor[c.flavorName] = (batchKgByFlavor[c.flavorName] ?? 0) + c.qty;
+    }
+    for (const f of Object.keys(batchKgByFlavor)) {
+      batchKgByFlavor[f] = Math.round((batchKgByFlavor[f] / 1000) * 1000) / 1000; // g → kg
+    }
+
+    const warnings: string[] = [];
+    if (cells.length === 0) warnings.push('No quantity cells found — is the file empty or wrong shape?');
+    if (flavorNames.length === 0) warnings.push('No flavor columns detected in the header row.');
+
+    return {
+      flavorNames,
+      ingredientNames,
+      cells,
+      newFlavors,
+      newIngredients,
+      recipeCount: flavorNames.length,
+      lineCount: cells.length,
+      batchKgByFlavor,
+      warnings,
+    };
+  }
+
+  // ── Commit ──────────────────────────────────────────────────────────
+
+  /**
+   * Writes everything: creates missing flavors + ingredients, then one
+   * recipe per flavor, then all recipe_lines. Returns counts + errors.
+   *
+   * Assumes the DB has already been wiped (recipes/ingredients empty) but
+   * is safe either way — it matches existing flavors/ingredients by name.
+   */
+  async commit(preview: RecipePreview): Promise<ImportResult> {
+    const result: ImportResult = {
+      flavorsCreated: 0, ingredientsCreated: 0, recipesCreated: 0, linesCreated: 0, errors: [],
+    };
+    const norm = (s: string) => s.trim().toLowerCase();
+
+    // Reload catalogs fresh so we have current IDs.
+    const catalogs = await this.loadCatalogs();
+    const flavorIdByName = new Map(catalogs.flavors.map((f) => [norm(f.name), f.id]));
+    const ingredientIdByName = new Map(catalogs.ingredients.map((i) => [norm(i.name), i.id]));
+
+    // 1. Create missing flavors
+    const flavorsToCreate = preview.flavorNames.filter((f) => !flavorIdByName.has(norm(f)));
+    if (flavorsToCreate.length > 0) {
+      const { data, error } = await this.supabase.client
+        .from('gg_flavors')
+        .insert(flavorsToCreate.map((name) => ({ name, active: true })))
+        .select('id, name');
+      if (error) { result.errors.push(`Create flavors: ${error.message}`); return result; }
+      for (const f of data ?? []) { flavorIdByName.set(norm(f.name), f.id); result.flavorsCreated++; }
+    }
+
+    // 2. Create missing ingredients (default_unit g)
+    const ingredientsToCreate = preview.ingredientNames.filter((i) => !ingredientIdByName.has(norm(i)));
+    if (ingredientsToCreate.length > 0) {
+      const { data, error } = await this.supabase.client
+        .from('gg_ingredients')
+        .insert(ingredientsToCreate.map((name) => ({ name, default_unit: 'g', active: true })))
+        .select('id, name');
+      if (error) { result.errors.push(`Create ingredients: ${error.message}`); return result; }
+      for (const i of data ?? []) { ingredientIdByName.set(norm(i.name), i.id); result.ingredientsCreated++; }
+    }
+
+    // 3. Create one recipe per flavor
+    const recipeIdByFlavor = new Map<string, string>();
+    for (const flavorName of preview.flavorNames) {
+      const flavorId = flavorIdByName.get(norm(flavorName));
+      if (!flavorId) { result.errors.push(`No flavor id for ${flavorName}`); continue; }
+      const { data, error } = await this.supabase.client
+        .from('gg_recipes')
+        .insert({
+          name: `${flavorName} Recipe`,
+          flavor_id: flavorId,
+          batch_size_kg: preview.batchKgByFlavor[flavorName] ?? 0,
+          is_active: true,
+        })
+        .select('id')
+        .single();
+      if (error || !data) { result.errors.push(`Create recipe ${flavorName}: ${error?.message}`); continue; }
+      recipeIdByFlavor.set(flavorName, data.id);
+      result.recipesCreated++;
+    }
+
+    // 4. Create recipe_lines
+    const lineRows: Array<{ recipe_id: string; ingredient_id: string; qty: number }> = [];
+    for (const cell of preview.cells) {
+      const recipeId = recipeIdByFlavor.get(cell.flavorName);
+      const ingredientId = ingredientIdByName.get(norm(cell.ingredientName));
+      if (!recipeId || !ingredientId) continue;
+      lineRows.push({ recipe_id: recipeId, ingredient_id: ingredientId, qty: cell.qty });
+    }
+
+    // Insert in chunks of 200
+    for (let i = 0; i < lineRows.length; i += 200) {
+      const chunk = lineRows.slice(i, i + 200);
+      const { error } = await this.supabase.client.from('recipe_lines').insert(chunk);
+      if (error) { result.errors.push(`Recipe lines chunk ${i / 200}: ${error.message}`); continue; }
+      result.linesCreated += chunk.length;
+    }
+
+    return result;
+  }
+}

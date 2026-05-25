@@ -3,6 +3,7 @@ import { CommonModule, DecimalPipe } from '@angular/common';
 import { FormBuilder, ReactiveFormsModule, Validators, FormsModule } from '@angular/forms';
 import { SupabaseService } from '../../../core/supabase.service';
 import { SearchableSelectComponent, SearchableSelectOption } from '../../../shared/components/searchable-select.component';
+import { RecipeImportModalComponent } from './recipe-import-modal.component';
 
 // Canonical units only (Phase 10). Recipe qty must be entered in grams
 // (or ml / pcs) so it matches gg_ingredients.current_stock and the API's
@@ -52,7 +53,7 @@ interface IngLine {
 @Component({
   selector: 'app-recipes-admin',
   standalone: true,
-  imports: [CommonModule, DecimalPipe, ReactiveFormsModule, FormsModule, SearchableSelectComponent],
+  imports: [CommonModule, DecimalPipe, ReactiveFormsModule, FormsModule, SearchableSelectComponent, RecipeImportModalComponent],
   template: `
     <!-- ── toast ──────────────────────────────────────────────────────────── -->
     @if (toast()) {
@@ -70,13 +71,25 @@ interface IngLine {
           <h1 style="font-size:22px;font-weight:700;color:var(--foreground);margin:0 0 4px;font-family:'Cabin',sans-serif;">Recipes</h1>
           <p style="color:#6B7280;font-size:14px;margin:0;">Build bills of materials for each flavor variant.</p>
         </div>
-        <button (click)="openNewForm()" [disabled]="showForm() && !editId()"
-                style="padding:9px 18px;background:#01AC51;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;opacity:1;"
-                [style.opacity]="showForm() && !editId() ? '0.6' : '1'">
-          <span class="material-icons-round" style="font-size:18px;">add</span>
-          New Recipe
-        </button>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button (click)="showImport.set(true)" [disabled]="showForm()"
+                  style="padding:9px 16px;background:#fff;color:#01AC51;border:1px solid #01AC51;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;"
+                  [style.opacity]="showForm() ? '0.6' : '1'">
+            <span class="material-icons-round" style="font-size:18px;">upload_file</span>
+            Import CSV
+          </button>
+          <button (click)="openNewForm()" [disabled]="showForm() && !editId()"
+                  style="padding:9px 18px;background:#01AC51;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;opacity:1;"
+                  [style.opacity]="showForm() && !editId() ? '0.6' : '1'">
+            <span class="material-icons-round" style="font-size:18px;">add</span>
+            New Recipe
+          </button>
+        </div>
       </div>
+
+      @if (showImport()) {
+        <app-recipe-import-modal (closed)="onImportClosed($event)"></app-recipe-import-modal>
+      }
 
       <!-- ── Recipe form ─────────────────────────────────────────────────── -->
       @if (showForm()) {
@@ -422,6 +435,7 @@ export class RecipesAdminComponent implements OnInit {
   loading    = signal(true);
   saving     = signal(false);
   showForm   = signal(false);
+  showImport = signal(false);
   editId     = signal<string | null>(null);
   recipes    = signal<RecipeRow[]>([]);
   flavors    = signal<Flavor[]>([]);
@@ -569,6 +583,14 @@ export class RecipesAdminComponent implements OnInit {
     this.formError.set('');
     this.showForm.set(true);
     setTimeout(() => document.querySelector('.recipe-form-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  }
+
+  async onImportClosed(event: { imported: boolean }): Promise<void> {
+    this.showImport.set(false);
+    if (event.imported) {
+      await this.loadRecipes();
+      this.showToast('Recipes imported', 'success');
+    }
   }
 
   // ── Save ──────────────────────────────────────────────────────────────
