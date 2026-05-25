@@ -3,28 +3,25 @@ import { CommonModule, DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SupabaseService } from '../../../core/supabase.service';
 
-// Units per kg of yield (both batch options share the same ratio)
-// 7500 units / 10.5 kg yield = 714.285...  (and 10000 / 14 = 714.285)
-const UNITS_PER_KG = 7500 / 10.5;
-
-interface BatchOption { units: number; boxes: number; rawMaterialKg: number; expectedYieldKg: number; }
-const BATCH_OPTIONS: BatchOption[] = [
-  { units: 7500,  boxes: 500, rawMaterialKg: 15, expectedYieldKg: 10.5 },
-  { units: 10000, boxes: 667, rawMaterialKg: 20, expectedYieldKg: 14 },
-];
+// Factory conversion constants (must match the mobile app).
+//   - Each box of finished gum weighs ~0.021 kg and holds 15 pieces.
+//   - So 1 kg of product ~= 1/0.021 boxes ~= 47.6 boxes ~= 714.29 units.
+//   - A 7500-pc batch = 500 boxes = 10.5 kg, which gives 7500 / 10.5 = 714.29.
+const KG_PER_BOX    = 0.021;
+const UNITS_PER_BOX = 15;
+const UNITS_PER_KG  = UNITS_PER_BOX / KG_PER_BOX; // 714.2857...
 
 interface WastageRow {
   batchCode: string;
   flavorName: string;
   date: string;
-  batchSizeUnits: number;
-  rawMaterialKg: number;
-  actualYieldKg: number;
-  kgWasted: number;
-  expectedYieldKg: number;
-  actualUnits: number;
-  unitsLess: number;
-  boxesLess: number;
+  rawMaterialKg: number;   // raw material that went in (production_batches.planned_yield)
+  actualYieldKg: number;   // finished product that came out (production_batches.actual_yield)
+  kgWasted: number;        // rawMaterialKg - actualYieldKg
+  expectedUnits: number;   // units the raw input should have produced
+  unitsPacked: number;     // units the actual yield translates to
+  unitsLess: number;       // expectedUnits - unitsPacked
+  boxesLess: number;       // unitsLess / 15
 }
 
 @Component({
@@ -96,16 +93,17 @@ interface WastageRow {
         </div>
       } @else {
         <div style="background:#fff;border-radius:12px;border:1px solid #E5E7EB;overflow:auto;">
-          <table style="width:100%;border-collapse:collapse;min-width:900px;">
+          <table style="width:100%;border-collapse:collapse;min-width:980px;">
             <thead>
               <tr style="background:#f8f9fa;border-bottom:1px solid #E5E7EB;">
                 <th style="text-align:left;padding:11px 14px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;white-space:nowrap;">Date</th>
                 <th style="text-align:left;padding:11px 14px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;white-space:nowrap;">Batch Code</th>
                 <th style="text-align:left;padding:11px 14px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;white-space:nowrap;">Flavor</th>
-                <th style="text-align:right;padding:11px 14px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;white-space:nowrap;">Batch Size</th>
                 <th style="text-align:right;padding:11px 14px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;white-space:nowrap;">Raw Input</th>
                 <th style="text-align:right;padding:11px 14px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;white-space:nowrap;">Actual Yield</th>
                 <th style="text-align:right;padding:11px 14px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;white-space:nowrap;">Kg Wasted</th>
+                <th style="text-align:right;padding:11px 14px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;white-space:nowrap;">Expected Units</th>
+                <th style="text-align:right;padding:11px 14px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;white-space:nowrap;">Units Packed</th>
                 <th style="text-align:right;padding:11px 14px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;white-space:nowrap;">Units Short</th>
                 <th style="text-align:right;padding:11px 14px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;white-space:nowrap;">Boxes Short</th>
               </tr>
@@ -120,10 +118,6 @@ interface WastageRow {
                   </td>
                   <td style="padding:10px 14px;font-size:13px;color:#374151;">{{ r.flavorName }}</td>
                   <td style="padding:10px 14px;text-align:right;">
-                    <span style="font-size:13px;font-weight:600;color:#374151;">{{ r.batchSizeUnits | number:'1.0-0' }}</span>
-                    <span style="font-size:11px;color:#9CA3AF;margin-left:2px;">units</span>
-                  </td>
-                  <td style="padding:10px 14px;text-align:right;">
                     <span style="font-size:13px;font-weight:600;color:#1d4ed8;">{{ r.rawMaterialKg | number:'1.0-1' }}</span>
                     <span style="font-size:11px;color:#9CA3AF;margin-left:2px;">kg</span>
                   </td>
@@ -137,6 +131,12 @@ interface WastageRow {
                       {{ r.kgWasted | number:'1.0-2' }}
                     </span>
                     <span style="font-size:11px;color:#9CA3AF;margin-left:2px;">kg</span>
+                  </td>
+                  <td style="padding:10px 14px;text-align:right;">
+                    <span style="font-size:13px;font-weight:600;color:#374151;">{{ r.expectedUnits | number:'1.0-0' }}</span>
+                  </td>
+                  <td style="padding:10px 14px;text-align:right;">
+                    <span style="font-size:13px;font-weight:600;color:#15803d;">{{ r.unitsPacked | number:'1.0-0' }}</span>
                   </td>
                   <td style="padding:10px 14px;text-align:right;">
                     <span style="font-size:13px;font-weight:700;"
@@ -198,10 +198,11 @@ export class WastageComponent implements OnInit {
   }
 
   exportCSV(): void {
-    const headers = ['Date', 'Batch Code', 'Flavor', 'Batch Size (units)', 'Raw Material (kg)', 'Actual Yield (kg)', 'Kg Wasted', 'Units Short', 'Boxes Short'];
+    const headers = ['Date', 'Batch Code', 'Flavor', 'Raw Material (kg)', 'Actual Yield (kg)', 'Kg Wasted', 'Expected Units', 'Units Packed', 'Units Short', 'Boxes Short'];
     const csv = [headers.join(','), ...this.filtered().map(r => [
-      r.date, r.batchCode, `"${r.flavorName}"`, r.batchSizeUnits, r.rawMaterialKg,
+      r.date, r.batchCode, `"${r.flavorName}"`, r.rawMaterialKg,
       r.actualYieldKg.toFixed(2), r.kgWasted.toFixed(2),
+      Math.round(r.expectedUnits), Math.round(r.unitsPacked),
       Math.round(r.unitsLess), r.boxesLess.toFixed(1),
     ].join(','))].join('\n');
     const a = document.createElement('a');
@@ -226,27 +227,30 @@ export class WastageComponent implements OnInit {
     }
 
     const list: WastageRow[] = (data ?? []).map((p: any) => {
-      const batchSizeUnits: number = p.planned_yield ?? 7500;
-      const batchOpt = BATCH_OPTIONS.find(o => o.units === batchSizeUnits) ?? BATCH_OPTIONS[0];
+      // planned_yield = raw material weight in (kg); actual_yield = finished weight out (kg).
+      const rawMaterialKg = p.planned_yield ?? 0;
+      const actualYieldKg = p.actual_yield ?? 0;
 
-      const rawMaterialKg   = batchOpt.rawMaterialKg;
-      const expectedYieldKg = batchOpt.expectedYieldKg;
-      const actualYieldKg   = p.actual_yield ?? 0;
-      const kgWasted        = Math.max(0, rawMaterialKg - actualYieldKg);
-      const actualUnits     = Math.round(actualYieldKg * UNITS_PER_KG);
-      const unitsLess       = Math.max(0, batchSizeUnits - actualUnits);
-      const boxesLess       = unitsLess / 15;
+      // 1. Wastage = what went in - what came out (kg).
+      const kgWasted = Math.max(0, rawMaterialKg - actualYieldKg);
+
+      // 3. Units short = expected units (from raw input) - units packed (from actual yield).
+      const expectedUnits = Math.round(rawMaterialKg * UNITS_PER_KG);
+      const unitsPacked   = Math.round(actualYieldKg * UNITS_PER_KG);
+      const unitsLess     = Math.max(0, expectedUnits - unitsPacked);
+
+      // 2. Boxes short = units short / 15.
+      const boxesLess = unitsLess / UNITS_PER_BOX;
 
       return {
-        batchCode:      p.batch_code ?? '—',
+        batchCode:      p.batch_code ?? '-',
         flavorName:     (p.flavor as any)?.name ?? 'Unknown',
         date:           (p.production_date ?? '').substring(0, 10),
-        batchSizeUnits,
         rawMaterialKg,
         actualYieldKg,
         kgWasted,
-        expectedYieldKg,
-        actualUnits,
+        expectedUnits,
+        unitsPacked,
         unitsLess,
         boxesLess,
       };
