@@ -588,6 +588,10 @@ export class RecipesAdminComponent implements OnInit {
   async onImportClosed(event: { imported: boolean }): Promise<void> {
     this.showImport.set(false);
     if (event.imported) {
+      // Refresh ingredients + flavors first so newly-created per-flavor
+      // "Flavour" ingredients resolve to names (not raw UUIDs) and the form
+      // pickers include them.
+      await Promise.all([this.loadIngredients(), this.loadFlavors()]);
       await this.loadRecipes();
       this.showToast('Recipes imported', 'success');
     }
@@ -690,19 +694,24 @@ export class RecipesAdminComponent implements OnInit {
         .order('created_at', { ascending: false }),
       this.supabase.client
         .from('recipe_lines')
-        .select('recipe_id, ingredient_id, qty'),
+        .select('recipe_id, ingredient_id, qty, gg_ingredients(name, default_unit)'),
     ]);
 
     const ingMap = new Map(this.ingredients().map(i => [i.id, i]));
-    const linesByRecipeId = new Map<string, Array<{ ingredient_id: string; quantity: number; unit: string }>>();
+    const linesByRecipeId = new Map<string, RecipeIngredient[]>();
 
     (recipeLines ?? []).forEach((line: any) => {
       const existing = linesByRecipeId.get(line.recipe_id) ?? [];
-      const ingredient = ingMap.get(line.ingredient_id);
+      // Prefer the embedded ingredient (always current, even right after an
+      // import created it); fall back to the locally-cached list, then to the
+      // raw id only if the ingredient genuinely can't be found.
+      const embedded = line.gg_ingredients;
+      const cached = ingMap.get(line.ingredient_id);
       existing.push({
         ingredient_id: line.ingredient_id,
         quantity: Number(line.qty) || 0,
-        unit: ingredient?.default_unit ?? 'g',
+        unit: embedded?.default_unit ?? cached?.default_unit ?? 'g',
+        name: embedded?.name ?? cached?.name ?? line.ingredient_id,
       });
       linesByRecipeId.set(line.recipe_id, existing);
     });
@@ -714,12 +723,7 @@ export class RecipesAdminComponent implements OnInit {
       flavor_name: r.gg_flavors?.name ?? 'Unknown',
       batch_size_kg: r.batch_size_kg,
       is_active: r.is_active,
-      ingredients: (linesByRecipeId.get(r.id) ?? []).map((i: any) => ({
-        ingredient_id: i.ingredient_id,
-        quantity: i.quantity,
-        unit: i.unit,
-        name: ingMap.get(i.ingredient_id)?.name ?? i.ingredient_id,
-      })),
+      ingredients: linesByRecipeId.get(r.id) ?? [],
     })));
     this.loading.set(false);
   }

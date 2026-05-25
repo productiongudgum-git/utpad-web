@@ -59,6 +59,7 @@ export interface ImportResult {
   flavorsCreated: number;
   ingredientsCreated: number;
   recipesCreated: number;
+  recipesUpdated: number;
   linesCreated: number;
   errors: string[];
 }
@@ -177,7 +178,7 @@ export class RecipeImportService {
    */
   async commit(preview: RecipePreview): Promise<ImportResult> {
     const result: ImportResult = {
-      flavorsCreated: 0, ingredientsCreated: 0, recipesCreated: 0, linesCreated: 0, errors: [],
+      flavorsCreated: 0, ingredientsCreated: 0, recipesCreated: 0, recipesUpdated: 0, linesCreated: 0, errors: [],
     };
     const norm = (s: string) => s.trim().toLowerCase();
 
@@ -210,27 +211,64 @@ export class RecipeImportService {
       for (const i of data ?? []) { ingredientIdByName.set(norm(i.name), i.id); result.ingredientsCreated++; }
     }
 
-    // 3. Create one recipe per flavor
+    // 3. Upsert one recipe per flavor. If a recipe already exists for the
+    //    flavor, update it in place (so re-importing the sheet edits the
+    //    recipe instead of creating a duplicate); otherwise insert a new one.
+    const existingRecipesRes = await this.supabase.client
+      .from('gg_recipes')
+      .select('id, flavor_id');
+    const recipeIdByFlavorId = new Map<string, string>();
+    for (const r of (existingRecipesRes.data ?? []) as Array<{ id: string; flavor_id: string }>) {
+      if (r.flavor_id && !recipeIdByFlavorId.has(r.flavor_id)) {
+        recipeIdByFlavorId.set(r.flavor_id, r.id);
+      }
+    }
+
     const recipeIdByFlavor = new Map<string, string>();
     for (const flavorName of preview.flavorNames) {
       const flavorId = flavorIdByName.get(norm(flavorName));
       if (!flavorId) { result.errors.push(`No flavor id for ${flavorName}`); continue; }
-      const { data, error } = await this.supabase.client
-        .from('gg_recipes')
-        .insert({
-          name: `${flavorName} Recipe`,
-          flavor_id: flavorId,
-          batch_size_kg: preview.batchKgByFlavor[flavorName] ?? 0,
-          is_active: true,
-        })
-        .select('id')
-        .single();
-      if (error || !data) { result.errors.push(`Create recipe ${flavorName}: ${error?.message}`); continue; }
-      recipeIdByFlavor.set(flavorName, data.id);
-      result.recipesCreated++;
+
+      const recipePayload = {
+        name: `${flavorName} Recipe`,
+        flavor_id: flavorId,
+        batch_size_kg: preview.batchKgByFlavor[flavorName] ?? 0,
+        is_active: true,
+      };
+
+      const existingId = recipeIdByFlavorId.get(flavorId);
+      if (existingId) {
+        const { error } = await this.supabase.client
+          .from('gg_recipes')
+          .update(recipePayload)
+          .eq('id', existingId);
+        if (error) { result.errors.push(`Update recipe ${flavorName}: ${error.message}`); continue; }
+        recipeIdByFlavor.set(flavorName, existingId);
+        result.recipesUpdated++;
+      } else {
+        const { data, error } = await this.supabase.client
+          .from('gg_recipes')
+          .insert(recipePayload)
+          .select('id')
+          .single();
+        if (error || !data) { result.errors.push(`Create recipe ${flavorName}: ${error?.message}`); continue; }
+        recipeIdByFlavor.set(flavorName, data.id);
+        result.recipesCreated++;
+      }
     }
 
-    // 4. Create recipe_lines
+    // 4. Replace recipe_lines. Clear any existing lines for the recipes we're
+    //    writing, then insert the fresh set — keeps re-imports idempotent and
+    //    avoids primary-key clashes on (recipe_id, ingredient_id).
+    const recipeIds = Array.from(new Set(recipeIdByFlavor.values()));
+    if (recipeIds.length > 0) {
+      const { error: delErr } = await this.supabase.client
+        .from('recipe_lines')
+        .delete()
+        .in('recipe_id', recipeIds);
+      if (delErr) { result.errors.push(`Clear old recipe lines: ${delErr.message}`); }
+    }
+
     const lineRows: Array<{ recipe_id: string; ingredient_id: string; qty: number }> = [];
     for (const cell of preview.cells) {
       const recipeId = recipeIdByFlavor.get(cell.flavorName);

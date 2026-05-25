@@ -115,6 +115,7 @@ type State = 'idle' | 'parsing' | 'preview' | 'committing' | 'results';
                 <span>Flavors created: <strong>{{ result()!.flavorsCreated }}</strong></span>
                 <span>Ingredients created: <strong>{{ result()!.ingredientsCreated }}</strong></span>
                 <span>Recipes created: <strong>{{ result()!.recipesCreated }}</strong></span>
+                <span>Recipes updated: <strong>{{ result()!.recipesUpdated }}</strong></span>
                 <span>Recipe lines created: <strong>{{ result()!.linesCreated }}</strong></span>
               </div>
               @if (result()!.errors.length > 0) {
@@ -224,5 +225,8 @@ export class RecipeImportModalComponent {
 
   onBackdrop(): void { if (this.state() !== 'committing') this.onCancel(); }
   onCancel(): void { if (this.state() !== 'committing') this.closed.emit({ imported: false }); }
-  onClose(): void { this.closed.emit({ imported: !!this.result() && this.result()!.recipesCreated > 0 }); }
+  onClose(): void {
+    const r = this.result();
+    this.closed.emit({ imported: !!r && (r.recipesCreated + r.recipesUpdated) > 0 });
+  }
 }
