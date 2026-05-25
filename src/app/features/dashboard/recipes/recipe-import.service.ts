@@ -26,6 +26,16 @@ import { SupabaseService } from '../../../core/supabase.service';
 const BATCH_PCS = 7500;
 const FLAVOUR_ROW = 'flavour'; // the generic row that expands per flavor
 
+/** Derive a gg_flavors.code from a flavor name. "Mellow Mint" → "MELLOW-MINT". */
+function makeCode(name: string): string {
+  return (name || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32) || 'FLAVOR';
+}
+
 export interface ParsedCell {
   flavorName: string;
   ingredientName: string;   // already expanded ("Strawberry Flavour")
@@ -176,12 +186,14 @@ export class RecipeImportService {
     const flavorIdByName = new Map(catalogs.flavors.map((f) => [norm(f.name), f.id]));
     const ingredientIdByName = new Map(catalogs.ingredients.map((i) => [norm(i.name), i.id]));
 
-    // 1. Create missing flavors
+    // 1. Create missing flavors. gg_flavors.code is NOT NULL, so derive a
+    //    code from the name (e.g. "Mellow Mint" → "MELLOW-MINT"). Existing
+    //    flavors are matched by name and never recreated.
     const flavorsToCreate = preview.flavorNames.filter((f) => !flavorIdByName.has(norm(f)));
     if (flavorsToCreate.length > 0) {
       const { data, error } = await this.supabase.client
         .from('gg_flavors')
-        .insert(flavorsToCreate.map((name) => ({ name, active: true })))
+        .insert(flavorsToCreate.map((name) => ({ name, code: makeCode(name), active: true })))
         .select('id, name');
       if (error) { result.errors.push(`Create flavors: ${error.message}`); return result; }
       for (const f of data ?? []) { flavorIdByName.set(norm(f.name), f.id); result.flavorsCreated++; }
