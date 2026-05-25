@@ -4,12 +4,10 @@ import { FormsModule } from '@angular/forms';
 import { SupabaseService } from '../../../core/supabase.service';
 
 // Factory conversion constants (must match the mobile app).
-//   - Each box of finished gum weighs ~0.021 kg and holds 15 pieces.
-//   - So 1 kg of product ~= 1/0.021 boxes ~= 47.6 boxes ~= 714.29 units.
-//   - A 7500-pc batch = 500 boxes = 10.5 kg, which gives 7500 / 10.5 = 714.29.
-const KG_PER_BOX    = 0.021;
-const UNITS_PER_BOX = 15;
-const UNITS_PER_KG  = UNITS_PER_BOX / KG_PER_BOX; // 714.2857...
+//   - Each piece of gum weighs 1.4 g.
+//   - A box holds 15 pieces = 21 g = 0.021 kg.
+const GRAMS_PER_UNIT = 1.4;
+const UNITS_PER_BOX  = 15;
 
 interface WastageRow {
   batchCode: string;
@@ -18,8 +16,8 @@ interface WastageRow {
   rawMaterialKg: number;   // raw material that went in (production_batches.planned_yield)
   actualYieldKg: number;   // finished product that came out (production_batches.actual_yield)
   kgWasted: number;        // rawMaterialKg - actualYieldKg
-  expectedUnits: number;   // units the raw input should have produced
-  unitsPacked: number;     // units the actual yield translates to
+  expectedUnits: number;   // actual yield weight / 1.4 g per piece
+  unitsPacked: number;     // boxes packed (packing_sessions) x 15
   unitsLess: number;       // expectedUnits - unitsPacked
   boxesLess: number;       // unitsLess / 15
 }
@@ -214,32 +212,49 @@ export class WastageComponent implements OnInit {
   private async loadData(): Promise<void> {
     this.loading.set(true);
 
-    const { data, error } = await this.supabase.client
-      .from('production_batches')
-      .select('production_date, actual_yield, planned_yield, batch_code, flavor:gg_flavors!production_batches_flavor_id_fkey(name)')
-      .order('production_date', { ascending: false })
-      .limit(500);
+    const [batchesRes, packingRes] = await Promise.all([
+      this.supabase.client
+        .from('production_batches')
+        .select('batch_code, flavor_id, production_date, actual_yield, planned_yield, flavor:gg_flavors!production_batches_flavor_id_fkey(name)')
+        .order('production_date', { ascending: false })
+        .limit(500),
+      this.supabase.client
+        .from('packing_sessions')
+        .select('batch_code, flavor_id, boxes_packed'),
+    ]);
 
-    if (error) {
-      console.error('Wastage load error:', error);
+    if (batchesRes.error) {
+      console.error('Wastage load error:', batchesRes.error);
       this.loading.set(false);
       return;
     }
 
-    const list: WastageRow[] = (data ?? []).map((p: any) => {
-      // planned_yield = raw material weight in (kg); actual_yield = finished weight out (kg).
+    // Total boxes packed per batch + flavor (a batch can have several packing sessions).
+    const packedByKey = new Map<string, number>();
+    for (const s of (packingRes.data ?? []) as any[]) {
+      const key = `${s.batch_code}::${s.flavor_id}`;
+      packedByKey.set(key, (packedByKey.get(key) ?? 0) + (s.boxes_packed ?? 0));
+    }
+
+    const list: WastageRow[] = (batchesRes.data ?? []).map((p: any) => {
+      // planned_yield = raw material in (kg); actual_yield = finished product out (kg).
       const rawMaterialKg = p.planned_yield ?? 0;
       const actualYieldKg = p.actual_yield ?? 0;
 
       // 1. Wastage = what went in - what came out (kg).
       const kgWasted = Math.max(0, rawMaterialKg - actualYieldKg);
 
-      // 3. Units short = expected units (from raw input) - units packed (from actual yield).
-      const expectedUnits = Math.round(rawMaterialKg * UNITS_PER_KG);
-      const unitsPacked   = Math.round(actualYieldKg * UNITS_PER_KG);
-      const unitsLess     = Math.max(0, expectedUnits - unitsPacked);
+      // Expected units = actual yield weight / 1.4 g per piece.
+      const expectedUnits = Math.round((actualYieldKg * 1000) / GRAMS_PER_UNIT);
 
-      // 2. Boxes short = units short / 15.
+      // Units packed = boxes actually packed for this batch x 15 pieces/box.
+      const boxesPacked = packedByKey.get(`${p.batch_code}::${p.flavor_id}`) ?? 0;
+      const unitsPacked = boxesPacked * UNITS_PER_BOX;
+
+      // 3. Units short = expected units - units packed.
+      const unitsLess = Math.max(0, expectedUnits - unitsPacked);
+
+      // 2. Boxes short = units short / 15  (= expected boxes - boxes packed).
       const boxesLess = unitsLess / UNITS_PER_BOX;
 
       return {
