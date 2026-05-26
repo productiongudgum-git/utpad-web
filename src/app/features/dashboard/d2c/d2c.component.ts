@@ -9,7 +9,6 @@ interface D2CAllocation {
   flavor_id: string;
   flavor_name: string;
   boxes_allocated: number;
-  reallocation_point: number;
 }
 
 interface FifoLine {
@@ -46,24 +45,6 @@ const SUGGESTED_CHANNELS = ['Amazon', 'Swiggy', 'Zepto', 'Blinkit', 'Shopify'];
         </div>
       </div>
 
-      <!-- Below-threshold alerts banner -->
-      @if (!loading() && belowThresholdAllocations().length > 0) {
-        <div style="background:#fff5f5;border:1px solid #fca5a5;border-radius:12px;padding:14px 18px;margin-bottom:20px;">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-            <span class="material-icons-round" style="color:#dc2626;font-size:20px;">warning</span>
-            <span style="font-size:14px;font-weight:700;color:#991b1b;">
-              {{ belowThresholdAllocations().length }} allocation{{ belowThresholdAllocations().length > 1 ? 's' : '' }} below reallocation point
-            </span>
-          </div>
-          <div style="display:flex;flex-wrap:wrap;gap:8px;">
-            @for (a of belowThresholdAllocations(); track a.id) {
-              <span style="background:#fee2e2;border:1px solid #fca5a5;border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;color:#dc2626;">
-                {{ a.channel_name }} — {{ a.flavor_name }}: {{ a.boxes_allocated }} / {{ a.reallocation_point }} boxes
-              </span>
-            }
-          </div>
-        </div>
-      }
 
       @if (loading()) {
         <div style="display:flex;flex-direction:column;gap:10px;">
@@ -91,9 +72,6 @@ const SUGGESTED_CHANNELS = ['Amazon', 'Swiggy', 'Zepto', 'Blinkit', 'Shopify'];
                     [style.background]="selectedChannel() === ch ? '#01AC51' : '#f3f4f6'"
                     [style.color]="selectedChannel() === ch ? '#fff' : '#374151'">
               {{ ch }}
-              @if (channelBelowThreshold(ch)) {
-                <span style="display:inline-block;width:8px;height:8px;background:#dc2626;border-radius:50%;margin-left:6px;vertical-align:middle;"></span>
-              }
             </button>
           }
         </div>
@@ -125,34 +103,16 @@ const SUGGESTED_CHANNELS = ['Amazon', 'Swiggy', 'Zepto', 'Blinkit', 'Shopify'];
                 <tr style="border-bottom:1px solid #E5E7EB;">
                   <th style="text-align:left;padding:10px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Flavour</th>
                   <th style="text-align:right;padding:10px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Allocated</th>
-                  <th style="text-align:right;padding:10px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Realloc. Point</th>
-                  <th style="text-align:center;padding:10px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Status</th>
                   <th style="text-align:right;padding:10px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 @for (alloc of channelAllocations(); track alloc.id) {
-                  <tr style="border-bottom:1px solid #f3f4f6;"
-                      [style.background]="isBelowThreshold(alloc) ? '#fff5f5' : 'transparent'">
+                  <tr style="border-bottom:1px solid #f3f4f6;">
                     <td style="padding:14px 16px;font-size:14px;font-weight:600;color:#121212;">{{ alloc.flavor_name }}</td>
                     <td style="padding:14px 16px;text-align:right;">
                       <span style="font-size:15px;font-weight:700;color:#121212;">{{ alloc.boxes_allocated }}</span>
                       <span style="font-size:12px;color:#6B7280;"> boxes</span>
-                    </td>
-                    <td style="padding:14px 16px;text-align:right;">
-                      <span style="font-size:14px;color:#374151;">{{ alloc.reallocation_point }}</span>
-                      <span style="font-size:12px;color:#9CA3AF;"> boxes</span>
-                    </td>
-                    <td style="padding:14px 16px;text-align:center;">
-                      @if (isBelowThreshold(alloc)) {
-                        <span style="display:inline-flex;align-items:center;gap:4px;background:#fee2e2;color:#dc2626;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;">
-                          <span class="material-icons-round" style="font-size:12px;">warning</span> Low
-                        </span>
-                      } @else {
-                        <span style="display:inline-flex;align-items:center;gap:4px;background:#dcfce7;color:#15803d;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;">
-                          <span class="material-icons-round" style="font-size:12px;">check_circle</span> OK
-                        </span>
-                      }
                     </td>
                     <td style="padding:14px 16px;text-align:right;">
                       <button (click)="openEditAllocationModal(alloc)"
@@ -253,14 +213,6 @@ const SUGGESTED_CHANNELS = ['Amazon', 'Swiggy', 'Zepto', 'Blinkit', 'Shopify'];
                      class="gg-input" style="width:100%;font-size:14px;" placeholder="0">
             </div>
 
-            <!-- Reallocation Point -->
-            <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:5px;">
-                Reallocation Point <span style="font-weight:400;color:#9CA3AF;">(alert when below this)</span>
-              </label>
-              <input [(ngModel)]="allocForm.reallocationPoint" type="number" min="0" step="1"
-                     class="gg-input" style="width:100%;font-size:14px;" placeholder="0">
-            </div>
 
             <!-- FIFO Preview -->
             @if (fifoLines().length > 0) {
@@ -373,17 +325,13 @@ export class D2CComponent implements OnInit {
     this.allocations().filter(a => a.channel_name === this.selectedChannel())
   );
 
-  belowThresholdAllocations = computed(() =>
-    this.allocations().filter(a => this.isBelowThreshold(a))
-  );
-
   // Modal state
   showAddChannelModal  = signal(false);
   showAllocationModal  = signal(false);
   showDeleteModal      = signal(false);
 
   newChannelName = '';
-  allocForm      = { flavorId: '', flavorName: '', boxes: 0, reallocationPoint: 0 };
+  allocForm      = { flavorId: '', flavorName: '', boxes: 0 };
   editingAllocation:  D2CAllocation | null = null;
   deletingAllocation: D2CAllocation | null = null;
 
@@ -400,7 +348,7 @@ export class D2CComponent implements OnInit {
     this.loading.set(true);
     const { data, error } = await this.supabase.client
       .from('gg_d2c_allocations')
-      .select('id, channel_name, flavor_id, flavor_name, boxes_allocated, reallocation_point')
+      .select('id, channel_name, flavor_id, flavor_name, boxes_allocated')
       .order('channel_name')
       .order('flavor_name');
 
@@ -420,14 +368,6 @@ export class D2CComponent implements OnInit {
       .eq('active', true)
       .order('name');
     this.flavors.set(data ?? []);
-  }
-
-  isBelowThreshold(a: D2CAllocation): boolean {
-    return (a.reallocation_point ?? 0) > 0 && a.boxes_allocated <= a.reallocation_point;
-  }
-
-  channelBelowThreshold(channel: string): boolean {
-    return this.allocations().some(a => a.channel_name === channel && this.isBelowThreshold(a));
   }
 
   // ── Channel management ──────────────────────────────────
@@ -452,7 +392,7 @@ export class D2CComponent implements OnInit {
 
   openAddAllocationModal(): void {
     this.editingAllocation = null;
-    this.allocForm = { flavorId: '', flavorName: '', boxes: 0, reallocationPoint: 0 };
+    this.allocForm = { flavorId: '', flavorName: '', boxes: 0 };
     this.fifoLines.set([]);
     this.fifoError.set('');
     this.errorMsg.set('');
@@ -465,7 +405,6 @@ export class D2CComponent implements OnInit {
       flavorId: alloc.flavor_id,
       flavorName: alloc.flavor_name,
       boxes: alloc.boxes_allocated,
-      reallocationPoint: alloc.reallocation_point,
     };
     this.fifoLines.set([]);
     this.fifoError.set('');
@@ -589,9 +528,8 @@ export class D2CComponent implements OnInit {
         await this.supabase.client
           .from('gg_d2c_allocations')
           .update({
-            boxes_allocated:    this.fifoTotal(),
-            reallocation_point: this.allocForm.reallocationPoint,
-            updated_at:         new Date().toISOString(),
+            boxes_allocated: this.fifoTotal(),
+            updated_at:      new Date().toISOString(),
           })
           .eq('id', this.editingAllocation.id);
 
@@ -600,11 +538,10 @@ export class D2CComponent implements OnInit {
         const { data: newAlloc, error } = await this.supabase.client
           .from('gg_d2c_allocations')
           .insert({
-            channel_name:       this.selectedChannel(),
-            flavor_id:          this.allocForm.flavorId,
-            flavor_name:        this.allocForm.flavorName,
-            boxes_allocated:    this.fifoTotal(),
-            reallocation_point: this.allocForm.reallocationPoint,
+            channel_name:    this.selectedChannel(),
+            flavor_id:       this.allocForm.flavorId,
+            flavor_name:     this.allocForm.flavorName,
+            boxes_allocated: this.fifoTotal(),
           })
           .select('id')
           .single();
