@@ -23,6 +23,8 @@ interface NavItem {
     .sidebar-link:hover .link-icon { transform: scale(1.1); }
     .sidebar-link.active { background: var(--primary-light); color: var(--primary); }
     .sidebar-link .link-icon { font-size: 20px; width: 20px; height: 20px; transition: transform 0.2s; }
+    .user-card:hover { filter: brightness(0.97); }
+    .user-card.active { box-shadow: inset 0 0 0 1.5px var(--primary); }
     @media (max-width: 1023px) {
       .sidebar-panel { transform: translateX(-100%); }
       .sidebar-panel.open { transform: translateX(0); }
@@ -62,9 +64,14 @@ interface NavItem {
 
         <!-- User + Logout -->
         <div style="padding:16px;border-top:1px solid var(--sidebar-border);">
-          <div style="padding:12px;background:var(--secondary);border-radius:12px;margin-bottom:12px;">
-            <p style="font-size:14px;font-weight:600;color:var(--foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ userName() }}</p>
-            <p style="font-size:12px;color:var(--muted-fg);text-transform:capitalize;">{{ userRole() }}</p>
+          <div class="user-card" routerLink="team" routerLinkActive="active" (click)="closeSidebarOnMobile()"
+               title="Manage team"
+               style="padding:12px;background:var(--secondary);border-radius:12px;margin-bottom:12px;cursor:pointer;display:flex;align-items:center;gap:10px;transition:all 0.15s;">
+            <div style="flex:1;min-width:0;">
+              <p style="font-size:14px;font-weight:600;color:var(--foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0;">{{ userName() }}</p>
+              <p style="font-size:12px;color:var(--muted-fg);text-transform:capitalize;margin:0;">{{ userRole() }}</p>
+            </div>
+            <span class="material-icons-round" style="font-size:18px;color:var(--muted-fg);flex-shrink:0;">group</span>
           </div>
           <button (click)="logout()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;border-radius:12px;font-weight:500;font-size:14px;color:var(--destructive);background:none;border:none;cursor:pointer;transition:background 0.15s;"
                   onmouseover="this.style.background='rgba(255,40,40,0.06)'" onmouseout="this.style.background='none'">
@@ -122,7 +129,6 @@ export class DashboardShellComponent {
     // if you ever need to inspect or clean up.
     { label: 'Inventory',   icon: 'inventory_2',             route: 'inventory' },
     { label: 'Ingredients', icon: 'category',                route: 'ingredients' },
-    { label: 'Team',        icon: 'group',                   route: 'team' },
     { label: 'Wastage',     icon: 'delete_sweep',            route: 'wastage' },
     { label: 'Invoices',    icon: 'description',             route: 'invoices' },
     { label: 'Returns',     icon: 'assignment_return',       route: 'returns' },
