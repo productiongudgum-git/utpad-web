@@ -115,7 +115,6 @@ export class DashboardShellComponent {
 
   navItems: NavItem[] = [
     { label: 'Dashboard',   icon: 'dashboard',              route: 'home' },
-    { label: 'Live Kanban', icon: 'view_kanban',             route: 'kanban' },
     { label: 'Recipes',     icon: 'science',                 route: 'recipes' },
     // Flavors are the SKU behind each recipe — auto-created by the recipe
     // import and kept 1:1 with recipes. Hidden from nav so no one hand-creates

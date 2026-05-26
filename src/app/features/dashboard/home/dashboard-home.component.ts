@@ -3,6 +3,7 @@ import { CommonModule, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { SupabaseService } from '../../../core/supabase.service';
+import { KanbanComponent } from '../kanban/kanban.component';
 
 interface KpiData {
   activeBatches: number;
@@ -34,7 +35,7 @@ interface BatchDetail {
 @Component({
   selector: 'app-dashboard-home',
   standalone: true,
-  imports: [CommonModule, DecimalPipe, FormsModule],
+  imports: [CommonModule, DecimalPipe, FormsModule, KanbanComponent],
   template: `
     <div style="padding:28px 24px;max-width:1200px;">
 
@@ -260,6 +261,11 @@ interface BatchDetail {
         </div>
       }
 
+    </div>
+
+    <!-- Live Kanban — embedded below the Command Center -->
+    <div style="border-top:1px solid var(--border);margin-top:8px;">
+      <app-kanban />
     </div>
 
     <style>
