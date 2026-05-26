@@ -29,6 +29,11 @@ interface Ingredient {
   totalRecipes: number;         // total recipes in the system (for context)
   shared: boolean;              // used in >= half of recipes → base ingredient
   lowThreshold: number;         // batches below which it flags red
+  // Packing-material mapping (consumed per box when a flavour is packed).
+  packingRole: string | null;       // 'monocarton' | 'ziplock' | 'other' | null
+  packingFlavorId: string | null;   // flavour it's for; null = all flavours
+  packingFlavorName: string | null; // resolved flavour name for display
+  qtyPerBox: number;
 }
 
 @Component({
@@ -120,6 +125,42 @@ interface Ingredient {
               <div>
                 <label class="ing-label">Current Stock</label>
                 <input formControlName="current_stock" type="number" min="0" step="0.01" class="gg-input" placeholder="0">
+              </div>
+            </div>
+
+            <!-- Packing material (optional) -->
+            <div style="border-top:1px solid var(--border);margin-bottom:14px;padding-top:14px;">
+              <label class="ing-label">
+                Packing material
+                <span style="font-weight:400;color:#9CA3AF;">(deducted automatically per box when a flavour is packed)</span>
+              </label>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;" class="ing-form-grid">
+                <div>
+                  <label class="ing-label" style="font-size:11px;">Role</label>
+                  <select formControlName="packing_role" class="gg-input dropdown-with-arrow">
+                    <option value="">Not a packing material</option>
+                    <option value="monocarton">Monocarton (per flavour)</option>
+                    <option value="ziplock">Ziplock (all flavours)</option>
+                    <option value="other">Other (all flavours)</option>
+                  </select>
+                </div>
+                @if (form.get('packing_role')?.value === 'monocarton') {
+                  <div>
+                    <label class="ing-label" style="font-size:11px;">For flavour</label>
+                    <select formControlName="packing_flavor_id" class="gg-input dropdown-with-arrow">
+                      <option value="">Select flavour…</option>
+                      @for (f of flavors(); track f.id) {
+                        <option [value]="f.id">{{ f.name }}</option>
+                      }
+                    </select>
+                  </div>
+                }
+                @if (form.get('packing_role')?.value) {
+                  <div>
+                    <label class="ing-label" style="font-size:11px;">Qty per box</label>
+                    <input formControlName="qty_per_box" type="number" min="0" step="0.01" class="gg-input" placeholder="1">
+                  </div>
+                }
               </div>
             </div>
 
@@ -236,6 +277,13 @@ interface Ingredient {
                       <div>
                         <span style="font-size:14px;font-weight:600;color:var(--foreground);">{{ ing.name }}</span>
                         <span style="margin-left:6px;background:#f3f4f6;color:#6B7280;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:500;">{{ ing.default_unit }}</span>
+                        @if (ing.packingRole) {
+                          <div style="margin-top:3px;">
+                            <span style="font-size:10px;font-weight:600;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:4px;padding:1px 6px;display:inline-flex;align-items:center;gap:3px;">
+                              <span class="material-icons-round" style="font-size:11px;">inventory_2</span>{{ packingLabel(ing) }}
+                            </span>
+                          </div>
+                        }
                       </div>
                     </div>
                   </td>
@@ -360,6 +408,7 @@ export class IngredientsComponent implements OnInit {
   showForm = signal(false);
   editId = signal<string | null>(null);
   ingredients = signal<Ingredient[]>([]);
+  flavors = signal<{ id: string; name: string }[]>([]);
   formError = signal('');
   toast = signal('');
   toastKind = signal<'success' | 'error'>('success');
@@ -408,6 +457,9 @@ export class IngredientsComponent implements OnInit {
     default_unit:  ['kg', Validators.required],
     reorder_point: [0],
     current_stock: [0],
+    packing_role:      [''],   // '' | 'monocarton' | 'ziplock' | 'other'
+    packing_flavor_id: [''],   // required only when role = monocarton
+    qty_per_box:       [1],
   });
 
   async ngOnInit(): Promise<void> {
@@ -486,6 +538,13 @@ export class IngredientsComponent implements OnInit {
     return `${ing.batchesLeft} batch${ing.batchesLeft === 1 ? '' : 'es'}`;
   }
 
+  packingLabel(ing: Ingredient): string {
+    if (!ing.packingRole) return '';
+    const role = ing.packingRole.charAt(0).toUpperCase() + ing.packingRole.slice(1);
+    const scope = ing.packingFlavorName ?? 'all flavours';
+    return `${role} · ${scope} · ${ing.qtyPerBox}/box`;
+  }
+
   usageTooltip(ing: Ingredient): string {
     if (ing.batchesLeft == null) return 'Not used in any recipe yet';
     const across = ing.recipeCount > 1 ? ` (avg across ${ing.recipeCount} recipes)` : '';
@@ -529,7 +588,7 @@ export class IngredientsComponent implements OnInit {
 
   openNewForm(): void {
     this.editId.set(null);
-    this.form.reset({ name: '', default_unit: 'kg', reorder_point: 0, current_stock: 0 });
+    this.form.reset({ name: '', default_unit: 'kg', reorder_point: 0, current_stock: 0, packing_role: '', packing_flavor_id: '', qty_per_box: 1 });
     this.formError.set('');
     this.showForm.set(true);
   }
@@ -541,6 +600,9 @@ export class IngredientsComponent implements OnInit {
       default_unit: ing.default_unit,
       reorder_point: ing.reorder_point,
       current_stock: ing.current_stock,
+      packing_role: ing.packingRole ?? '',
+      packing_flavor_id: ing.packingFlavorId ?? '',
+      qty_per_box: ing.qtyPerBox ?? 1,
     });
     this.formError.set('');
     this.showForm.set(true);
@@ -575,6 +637,22 @@ export class IngredientsComponent implements OnInit {
     const normalizedCurrentStock = canonicalStock.qty;
     const normalizedReorderPoint = canonicalReorder.qty;
 
+    // Packing-material mapping. Flavour link only applies to monocartons;
+    // ziplock/other are generic (consumed for every flavour).
+    const packingRole = (v.packing_role || '').trim() || null;
+    const packingFlavorId = packingRole === 'monocarton' ? (v.packing_flavor_id || null) : null;
+    const qtyPerBox = packingRole ? Math.max(0, Number(v.qty_per_box) || 1) : 1;
+    if (packingRole === 'monocarton' && !packingFlavorId) {
+      this.formError.set('Select the flavour this monocarton belongs to.');
+      this.saving.set(false);
+      return;
+    }
+    const packingFields = {
+      packing_role: packingRole,
+      packing_flavor_id: packingFlavorId,
+      qty_per_box: qtyPerBox,
+    };
+
     let ingredientId = isEdit;
     const duplicateError = await this.validateDuplicateIngredient(normalizedName, isEdit);
     if (duplicateError) {
@@ -586,13 +664,13 @@ export class IngredientsComponent implements OnInit {
     if (isEdit) {
       const { error } = await this.supabase.client
         .from('gg_ingredients')
-        .update({ name: normalizedName, default_unit: normalizedUnit, active: true })
+        .update({ name: normalizedName, default_unit: normalizedUnit, active: true, ...packingFields })
         .eq('id', isEdit);
       if (error) { this.formError.set(error.message); this.saving.set(false); return; }
     } else {
       const { data, error } = await this.supabase.client
         .from('gg_ingredients')
-        .insert({ name: normalizedName, default_unit: normalizedUnit, active: true })
+        .insert({ name: normalizedName, default_unit: normalizedUnit, active: true, ...packingFields })
         .select('id')
         .single();
       if (error || !data) { this.formError.set(error?.message ?? 'Failed to create ingredient.'); this.saving.set(false); return; }
@@ -644,10 +722,11 @@ export class IngredientsComponent implements OnInit {
       { data: inventory },
       { data: vi },
       { data: recipeLines },
+      { data: flavorsData },
     ] = await Promise.all([
       this.supabase.client
         .from('gg_ingredients')
-        .select('id, name, default_unit')
+        .select('id, name, default_unit, packing_role, packing_flavor_id, qty_per_box')
         .order('name'),
       this.supabase.client
         .from('inventory_raw_materials')
@@ -658,7 +737,17 @@ export class IngredientsComponent implements OnInit {
       this.supabase.client
         .from('recipe_lines')
         .select('recipe_id, ingredient_id, qty'),
+      this.supabase.client
+        .from('gg_flavors')
+        .select('id, name')
+        .eq('active', true)
+        .order('name'),
     ]);
+
+    this.flavors.set((flavorsData ?? []) as { id: string; name: string }[]);
+    const flavorNameById = new Map<string, string>(
+      (flavorsData ?? []).map((f: any) => [f.id, f.name]),
+    );
 
     const inventoryMap = new Map<string, any>();
     (inventory ?? []).forEach((row: any) => inventoryMap.set(row.ingredient_id, row));
@@ -708,6 +797,10 @@ export class IngredientsComponent implements OnInit {
         totalRecipes,
         shared,
         lowThreshold,
+        packingRole: i.packing_role ?? null,
+        packingFlavorId: i.packing_flavor_id ?? null,
+        packingFlavorName: i.packing_flavor_id ? (flavorNameById.get(i.packing_flavor_id) ?? null) : null,
+        qtyPerBox: Number(i.qty_per_box ?? 1),
       };
     }));
     this.loading.set(false);
