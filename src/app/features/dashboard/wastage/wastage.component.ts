@@ -28,6 +28,8 @@ interface WastageRow {
   expectedInputKg: number;   // sum of snapshot qty / 1000
   inputDeviationKg: number;  // rawMaterialKg - expectedInputKg
   offRecipe: boolean;        // |deviation| beyond tolerance and a snapshot exists
+  // Per-ingredient planned vs actual (grams) — populated once the app sends it.
+  actualIngredients: Array<{ name: string; planned: number; actual: number }>;
 }
 
 @Component({
@@ -172,8 +174,9 @@ interface WastageRow {
                 @if (expanded().has(rowKey(r))) {
                   <tr style="background:#fafafa;border-bottom:1px solid #f3f4f6;">
                     <td colspan="10" style="padding:14px 20px;">
-                      @if (r.recipeSnapshot.length > 0) {
+                      @if (r.recipeSnapshot.length > 0 || r.actualIngredients.length > 0) {
                         <div style="display:flex;flex-wrap:wrap;gap:32px;align-items:flex-start;">
+                          @if (r.recipeSnapshot.length > 0) {
                           <div style="min-width:240px;">
                             <p style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;margin:0 0 8px;">Recipe used — snapshot at production</p>
                             <table style="border-collapse:collapse;">
@@ -185,6 +188,27 @@ interface WastageRow {
                               }
                             </table>
                           </div>
+                          }
+                          @if (r.actualIngredients.length > 0) {
+                            <div style="min-width:280px;">
+                              <p style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;margin:0 0 8px;">Ingredients used — planned vs actual</p>
+                              <table style="border-collapse:collapse;">
+                                <tr>
+                                  <td style="padding:2px 16px 2px 0;font-size:10px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Ingredient</td>
+                                  <td style="padding:2px 12px 2px 0;font-size:10px;font-weight:700;color:#9CA3AF;text-transform:uppercase;text-align:right;">Planned</td>
+                                  <td style="padding:2px 0;font-size:10px;font-weight:700;color:#9CA3AF;text-transform:uppercase;text-align:right;">Actual</td>
+                                </tr>
+                                @for (ing of r.actualIngredients; track ing.name) {
+                                  <tr [style.background]="ing.actual !== ing.planned ? '#fef3c7' : 'transparent'">
+                                    <td style="padding:3px 16px 3px 0;font-size:13px;color:#374151;">{{ ing.name }}</td>
+                                    <td style="padding:3px 12px 3px 0;font-size:13px;color:#6B7280;text-align:right;">{{ ing.planned | number:'1.0-0' }} g</td>
+                                    <td style="padding:3px 0;font-size:13px;font-weight:600;text-align:right;"
+                                        [style.color]="ing.actual !== ing.planned ? '#b45309' : '#121212'">{{ ing.actual | number:'1.0-0' }} g</td>
+                                  </tr>
+                                }
+                              </table>
+                            </div>
+                          }
                           <div style="min-width:200px;">
                             <p style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;margin:0 0 8px;">Input vs recipe</p>
                             <p style="font-size:13px;color:#374151;margin:0 0 4px;">Recipe expects <strong>{{ r.expectedInputKg | number:'1.0-2' }} kg</strong></p>
@@ -275,7 +299,7 @@ export class WastageComponent implements OnInit {
   private async loadData(): Promise<void> {
     this.loading.set(true);
 
-    const [batchesRes, packingRes] = await Promise.all([
+    const [batchesRes, packingRes, actualsRes] = await Promise.all([
       this.supabase.client
         .from('production_batches')
         .select('batch_code, flavor_id, production_date, actual_yield, planned_yield, recipe_snapshot, flavor:gg_flavors!production_batches_flavor_id_fkey(name)')
@@ -284,6 +308,9 @@ export class WastageComponent implements OnInit {
       this.supabase.client
         .from('packing_sessions')
         .select('batch_code, flavor_id, boxes_packed'),
+      this.supabase.client
+        .from('production_batch_ingredients')
+        .select('batch_code, flavor_id, planned_qty, actual_qty, ingredient:gg_ingredients(name)'),
     ]);
 
     if (batchesRes.error) {
@@ -297,6 +324,20 @@ export class WastageComponent implements OnInit {
     for (const s of (packingRes.data ?? []) as any[]) {
       const key = `${s.batch_code}::${s.flavor_id}`;
       packedByKey.set(key, (packedByKey.get(key) ?? 0) + (s.boxes_packed ?? 0));
+    }
+
+    // Per-ingredient planned-vs-actual rows per batch + flavor (Tier 2; empty
+    // until the app build that sends them lands and the table exists).
+    const actualsByKey = new Map<string, Array<{ name: string; planned: number; actual: number }>>();
+    for (const r of (actualsRes.data ?? []) as any[]) {
+      const key = `${r.batch_code}::${r.flavor_id}`;
+      const list = actualsByKey.get(key) ?? [];
+      list.push({
+        name: (r.ingredient as any)?.name ?? '—',
+        planned: Number(r.planned_qty) || 0,
+        actual: Number(r.actual_qty) || 0,
+      });
+      actualsByKey.set(key, list);
     }
 
     const list: WastageRow[] = (batchesRes.data ?? []).map((p: any) => {
@@ -345,6 +386,7 @@ export class WastageComponent implements OnInit {
         expectedInputKg,
         inputDeviationKg,
         offRecipe,
+        actualIngredients: actualsByKey.get(`${p.batch_code}::${p.flavor_id}`) ?? [],
       };
     });
 
