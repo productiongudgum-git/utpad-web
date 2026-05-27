@@ -8,6 +8,9 @@ import { SupabaseService } from '../../../core/supabase.service';
 //   - A box holds 15 pieces = 21 g = 0.021 kg.
 const GRAMS_PER_UNIT = 1.4;
 const UNITS_PER_BOX  = 15;
+// Flag a batch "off-recipe" if its actual raw input differs from the recipe's
+// expected total by more than this (kg) — catches worker amount changes.
+const DEVIATION_TOLERANCE_KG = 0.1;
 
 interface WastageRow {
   batchCode: string;
@@ -20,6 +23,11 @@ interface WastageRow {
   unitsPacked: number;     // boxes packed (packing_sessions) x 15
   unitsLess: number;       // expectedUnits - unitsPacked
   boxesLess: number;       // unitsLess / 15
+  // Recipe snapshot captured at production time (BEFORE INSERT trigger).
+  recipeSnapshot: Array<{ name: string; qty: number }>;  // qty in grams
+  expectedInputKg: number;   // sum of snapshot qty / 1000
+  inputDeviationKg: number;  // rawMaterialKg - expectedInputKg
+  offRecipe: boolean;        // |deviation| beyond tolerance and a snapshot exists
 }
 
 @Component({
@@ -108,13 +116,25 @@ interface WastageRow {
             </thead>
             <tbody>
               @for (r of filtered(); track r.batchCode + r.date) {
-                <tr style="border-bottom:1px solid #f3f4f6;"
+                <tr (click)="toggleExpand(r)" style="border-bottom:1px solid #f3f4f6;cursor:pointer;"
                     [style.background]="r.kgWasted > 2 ? '#fff5f5' : 'transparent'">
                   <td style="padding:10px 14px;font-size:13px;color:#6B7280;white-space:nowrap;">{{ r.date | date:'dd MMM yyyy' }}</td>
                   <td style="padding:10px 14px;">
-                    <span style="font-family:monospace;font-size:13px;font-weight:700;color:#121212;">{{ r.batchCode }}</span>
+                    <span style="display:inline-flex;align-items:center;gap:6px;">
+                      <span class="material-icons-round" style="font-size:16px;color:#9CA3AF;transition:transform 0.15s;"
+                            [style.transform]="expanded().has(rowKey(r)) ? 'rotate(180deg)' : 'none'">expand_more</span>
+                      <span style="font-family:monospace;font-size:13px;font-weight:700;color:#121212;">{{ r.batchCode }}</span>
+                    </span>
                   </td>
-                  <td style="padding:10px 14px;font-size:13px;color:#374151;">{{ r.flavorName }}</td>
+                  <td style="padding:10px 14px;font-size:13px;color:#374151;">
+                    {{ r.flavorName }}
+                    @if (r.offRecipe) {
+                      <span style="margin-left:6px;display:inline-flex;align-items:center;gap:3px;background:#fef3c7;color:#b45309;border:1px solid #fde68a;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;vertical-align:middle;"
+                            [title]="'Actual input vs recipe expected'">
+                        <span class="material-icons-round" style="font-size:11px;">tune</span>off-recipe {{ r.inputDeviationKg > 0 ? '+' : '' }}{{ r.inputDeviationKg | number:'1.0-2' }} kg
+                      </span>
+                    }
+                  </td>
                   <td style="padding:10px 14px;text-align:right;">
                     <span style="font-size:13px;font-weight:600;color:#1d4ed8;">{{ r.rawMaterialKg | number:'1.0-1' }}</span>
                     <span style="font-size:11px;color:#9CA3AF;margin-left:2px;">kg</span>
@@ -149,6 +169,37 @@ interface WastageRow {
                     </span>
                   </td>
                 </tr>
+                @if (expanded().has(rowKey(r))) {
+                  <tr style="background:#fafafa;border-bottom:1px solid #f3f4f6;">
+                    <td colspan="10" style="padding:14px 20px;">
+                      @if (r.recipeSnapshot.length > 0) {
+                        <div style="display:flex;flex-wrap:wrap;gap:32px;align-items:flex-start;">
+                          <div style="min-width:240px;">
+                            <p style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;margin:0 0 8px;">Recipe used — snapshot at production</p>
+                            <table style="border-collapse:collapse;">
+                              @for (ing of r.recipeSnapshot; track ing.name) {
+                                <tr>
+                                  <td style="padding:3px 16px 3px 0;font-size:13px;color:#374151;">{{ ing.name }}</td>
+                                  <td style="padding:3px 0;font-size:13px;font-weight:600;color:#121212;text-align:right;">{{ ing.qty | number:'1.0-0' }} g</td>
+                                </tr>
+                              }
+                            </table>
+                          </div>
+                          <div style="min-width:200px;">
+                            <p style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;margin:0 0 8px;">Input vs recipe</p>
+                            <p style="font-size:13px;color:#374151;margin:0 0 4px;">Recipe expects <strong>{{ r.expectedInputKg | number:'1.0-2' }} kg</strong></p>
+                            <p style="font-size:13px;color:#374151;margin:0 0 4px;">Actual input <strong>{{ r.rawMaterialKg | number:'1.0-2' }} kg</strong></p>
+                            <p style="font-size:13px;margin:0;font-weight:700;" [style.color]="r.offRecipe ? '#b45309' : '#15803d'">
+                              Deviation {{ r.inputDeviationKg > 0 ? '+' : '' }}{{ r.inputDeviationKg | number:'1.0-2' }} kg
+                            </p>
+                          </div>
+                        </div>
+                      } @else {
+                        <p style="font-size:13px;color:#9CA3AF;margin:0;">No recipe snapshot for this batch — it was produced before this was enabled, or no recipe was linked.</p>
+                      }
+                    </td>
+                  </tr>
+                }
               }
             </tbody>
           </table>
@@ -163,6 +214,7 @@ export class WastageComponent implements OnInit {
   loading = signal(true);
   rows    = signal<WastageRow[]>([]);
   filtered = signal<WastageRow[]>([]);
+  expanded = signal<Set<string>>(new Set());
 
   searchTerm = '';
   dateFrom   = '';
@@ -195,6 +247,17 @@ export class WastageComponent implements OnInit {
     this.applyFilter();
   }
 
+  rowKey(r: WastageRow): string { return r.batchCode + r.date; }
+
+  toggleExpand(r: WastageRow): void {
+    const key = this.rowKey(r);
+    this.expanded.update(s => {
+      const next = new Set(s);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+
   exportCSV(): void {
     const headers = ['Date', 'Batch Code', 'Flavor', 'Raw Material (kg)', 'Actual Yield (kg)', 'Kg Wasted', 'Expected Units', 'Units Packed', 'Units Short', 'Boxes Short'];
     const csv = [headers.join(','), ...this.filtered().map(r => [
@@ -215,7 +278,7 @@ export class WastageComponent implements OnInit {
     const [batchesRes, packingRes] = await Promise.all([
       this.supabase.client
         .from('production_batches')
-        .select('batch_code, flavor_id, production_date, actual_yield, planned_yield, flavor:gg_flavors!production_batches_flavor_id_fkey(name)')
+        .select('batch_code, flavor_id, production_date, actual_yield, planned_yield, recipe_snapshot, flavor:gg_flavors!production_batches_flavor_id_fkey(name)')
         .order('production_date', { ascending: false })
         .limit(500),
       this.supabase.client
@@ -257,6 +320,16 @@ export class WastageComponent implements OnInit {
       // 2. Boxes short = units short / 15  (= expected boxes - boxes packed).
       const boxesLess = unitsLess / UNITS_PER_BOX;
 
+      // Recipe snapshot captured when the batch was created. Compare its
+      // expected total input against what actually went in (planned_yield)
+      // to flag batches made with off-recipe amounts.
+      const recipeSnapshot = Array.isArray(p.recipe_snapshot)
+        ? p.recipe_snapshot.map((s: any) => ({ name: s.name ?? s.ingredient_id ?? '—', qty: Number(s.qty) || 0 }))
+        : [];
+      const expectedInputKg = recipeSnapshot.reduce((sum: number, s: any) => sum + s.qty, 0) / 1000;
+      const inputDeviationKg = rawMaterialKg - expectedInputKg;
+      const offRecipe = recipeSnapshot.length > 0 && Math.abs(inputDeviationKg) > DEVIATION_TOLERANCE_KG;
+
       return {
         batchCode:      p.batch_code ?? '-',
         flavorName:     (p.flavor as any)?.name ?? 'Unknown',
@@ -268,6 +341,10 @@ export class WastageComponent implements OnInit {
         unitsPacked,
         unitsLess,
         boxesLess,
+        recipeSnapshot,
+        expectedInputKg,
+        inputDeviationKg,
+        offRecipe,
       };
     });
 
