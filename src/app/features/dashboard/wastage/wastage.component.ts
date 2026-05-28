@@ -334,7 +334,7 @@ export class WastageComponent implements OnInit {
         .select('batch_code, flavor_id, boxes_packed'),
       this.supabase.client
         .from('production_batch_ingredients')
-        .select('batch_code, flavor_id, planned_qty, actual_qty, ingredient:gg_ingredients(name)'),
+        .select('batch_code, flavor_id, batch_number, planned_qty, actual_qty, ingredient:gg_ingredients(name)'),
     ]);
 
     if (batchesRes.error) {
@@ -352,9 +352,11 @@ export class WastageComponent implements OnInit {
 
     // Per-ingredient planned-vs-actual rows per batch + flavor (Tier 2; empty
     // until the app build that sends them lands and the table exists).
+    // Key on (batch_code, flavor_id, batch_number) so each production run has
+    // its own set of actuals — different runs of the same code+flavour don't share.
     const actualsByKey = new Map<string, Array<{ name: string; planned: number; actual: number }>>();
     for (const r of (actualsRes.data ?? []) as any[]) {
-      const key = `${r.batch_code}::${r.flavor_id}`;
+      const key = `${r.batch_code}::${r.flavor_id}::${r.batch_number ?? ''}`;
       const list = actualsByKey.get(key) ?? [];
       list.push({
         name: (r.ingredient as any)?.name ?? '—',
@@ -412,7 +414,7 @@ export class WastageComponent implements OnInit {
         expectedInputKg,
         inputDeviationKg,
         offRecipe,
-        actualIngredients: actualsByKey.get(`${p.batch_code}::${p.flavor_id}`) ?? [],
+        actualIngredients: actualsByKey.get(`${p.batch_code}::${p.flavor_id}::${p.batch_number ?? ''}`) ?? [],
       };
     });
 
