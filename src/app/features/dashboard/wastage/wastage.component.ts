@@ -11,9 +11,12 @@ const UNITS_PER_BOX  = 15;
 // Flag a batch "off-recipe" if its actual raw input differs from the recipe's
 // expected total by more than this (kg) — catches worker amount changes.
 const DEVIATION_TOLERANCE_KG = 0.1;
+const EXPANDED_STORAGE_KEY   = 'utpad-wastage-expanded-v1';
 
 interface WastageRow {
+  id: string;             // production_batches.id — unique per row, drives expand state
   batchCode: string;
+  batchNumber: number | null;
   flavorName: string;
   date: string;
   rawMaterialKg: number;   // raw material that went in (production_batches.planned_yield)
@@ -106,6 +109,7 @@ interface WastageRow {
               <tr style="background:#f8f9fa;border-bottom:1px solid #E5E7EB;">
                 <th style="text-align:left;padding:11px 14px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;white-space:nowrap;">Date</th>
                 <th style="text-align:left;padding:11px 14px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;white-space:nowrap;">Batch Code</th>
+                <th style="text-align:center;padding:11px 14px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;white-space:nowrap;">Batch #</th>
                 <th style="text-align:left;padding:11px 14px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;white-space:nowrap;">Flavor</th>
                 <th style="text-align:right;padding:11px 14px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;white-space:nowrap;">Raw Input</th>
                 <th style="text-align:right;padding:11px 14px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;white-space:nowrap;">Actual Yield</th>
@@ -117,7 +121,7 @@ interface WastageRow {
               </tr>
             </thead>
             <tbody>
-              @for (r of filtered(); track r.batchCode + r.date) {
+              @for (r of filtered(); track r.id) {
                 <tr (click)="toggleExpand(r)" style="border-bottom:1px solid #f3f4f6;cursor:pointer;"
                     [style.background]="r.kgWasted > 2 ? '#fff5f5' : 'transparent'">
                   <td style="padding:10px 14px;font-size:13px;color:#6B7280;white-space:nowrap;">{{ r.date | date:'dd MMM yyyy' }}</td>
@@ -127,6 +131,9 @@ interface WastageRow {
                             [style.transform]="expanded().has(rowKey(r)) ? 'rotate(180deg)' : 'none'">expand_more</span>
                       <span style="font-family:monospace;font-size:13px;font-weight:700;color:#121212;">{{ r.batchCode }}</span>
                     </span>
+                  </td>
+                  <td style="padding:10px 14px;font-size:13px;color:#374151;text-align:center;white-space:nowrap;">
+                    {{ r.batchNumber ?? '—' }}
                   </td>
                   <td style="padding:10px 14px;font-size:13px;color:#374151;">
                     {{ r.flavorName }}
@@ -173,7 +180,7 @@ interface WastageRow {
                 </tr>
                 @if (expanded().has(rowKey(r))) {
                   <tr style="background:#fafafa;border-bottom:1px solid #f3f4f6;">
-                    <td colspan="10" style="padding:14px 20px;">
+                    <td colspan="11" style="padding:14px 20px;">
                       @if (r.recipeSnapshot.length > 0 || r.actualIngredients.length > 0) {
                         <div style="display:flex;flex-wrap:wrap;gap:32px;align-items:flex-start;">
                           @if (r.recipeSnapshot.length > 0) {
@@ -250,7 +257,23 @@ export class WastageComponent implements OnInit {
   readonly totalUnitsLess = computed(() => this.rows().reduce((s, r) => s + r.unitsLess, 0));
 
   async ngOnInit(): Promise<void> {
+    this.loadExpandedFromStorage();
     await this.loadData();
+  }
+
+  private loadExpandedFromStorage(): void {
+    if (typeof sessionStorage === 'undefined') return;
+    try {
+      const raw = sessionStorage.getItem(EXPANDED_STORAGE_KEY);
+      if (raw) this.expanded.set(new Set(JSON.parse(raw) as string[]));
+    } catch { /* ignore corrupt storage */ }
+  }
+
+  private saveExpandedToStorage(s: Set<string>): void {
+    if (typeof sessionStorage === 'undefined') return;
+    try {
+      sessionStorage.setItem(EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(s)));
+    } catch { /* ignore quota errors */ }
   }
 
   applyFilter(): void {
@@ -271,21 +294,22 @@ export class WastageComponent implements OnInit {
     this.applyFilter();
   }
 
-  rowKey(r: WastageRow): string { return r.batchCode + r.date; }
+  rowKey(r: WastageRow): string { return r.id; }
 
   toggleExpand(r: WastageRow): void {
     const key = this.rowKey(r);
     this.expanded.update(s => {
       const next = new Set(s);
       next.has(key) ? next.delete(key) : next.add(key);
+      this.saveExpandedToStorage(next);
       return next;
     });
   }
 
   exportCSV(): void {
-    const headers = ['Date', 'Batch Code', 'Flavor', 'Raw Material (kg)', 'Actual Yield (kg)', 'Kg Wasted', 'Expected Units', 'Units Packed', 'Units Short', 'Boxes Short'];
+    const headers = ['Date', 'Batch Code', 'Batch #', 'Flavor', 'Raw Material (kg)', 'Actual Yield (kg)', 'Kg Wasted', 'Expected Units', 'Units Packed', 'Units Short', 'Boxes Short'];
     const csv = [headers.join(','), ...this.filtered().map(r => [
-      r.date, r.batchCode, `"${r.flavorName}"`, r.rawMaterialKg,
+      r.date, r.batchCode, r.batchNumber ?? '', `"${r.flavorName}"`, r.rawMaterialKg,
       r.actualYieldKg.toFixed(2), r.kgWasted.toFixed(2),
       Math.round(r.expectedUnits), Math.round(r.unitsPacked),
       Math.round(r.unitsLess), r.boxesLess.toFixed(1),
@@ -302,7 +326,7 @@ export class WastageComponent implements OnInit {
     const [batchesRes, packingRes, actualsRes] = await Promise.all([
       this.supabase.client
         .from('production_batches')
-        .select('batch_code, flavor_id, production_date, actual_yield, planned_yield, recipe_snapshot, flavor:gg_flavors!production_batches_flavor_id_fkey(name)')
+        .select('id, batch_code, batch_number, flavor_id, production_date, actual_yield, planned_yield, recipe_snapshot, flavor:gg_flavors!production_batches_flavor_id_fkey(name)')
         .order('production_date', { ascending: false })
         .limit(500),
       this.supabase.client
@@ -372,7 +396,9 @@ export class WastageComponent implements OnInit {
       const offRecipe = recipeSnapshot.length > 0 && Math.abs(inputDeviationKg) > DEVIATION_TOLERANCE_KG;
 
       return {
+        id:             p.id,
         batchCode:      p.batch_code ?? '-',
+        batchNumber:    p.batch_number ?? null,
         flavorName:     (p.flavor as any)?.name ?? 'Unknown',
         date:           (p.production_date ?? '').substring(0, 10),
         rawMaterialKg,
