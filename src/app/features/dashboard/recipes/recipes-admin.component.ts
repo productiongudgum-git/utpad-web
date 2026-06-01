@@ -39,6 +39,7 @@ interface RecipeRow {
   flavor_id: string;
   flavor_name: string;
   batch_size_kg: number;
+  units_per_batch: number;
   is_active: boolean;
   ingredients: RecipeIngredient[];
 }
@@ -156,6 +157,15 @@ interface IngLine {
                   </div>
                 }
               </div>
+            </div>
+
+            <!-- Units per batch — overrides the preset above; set from the CSV's "No of units" row on import. -->
+            <div style="margin-bottom:20px;max-width:260px;">
+              <label class="rcp-label">Units per batch *
+                <span style="font-weight:400;color:#9CA3AF;">(pieces this batch yields)</span>
+              </label>
+              <input formControlName="units_per_batch" type="number" min="1" step="1" class="gg-input" placeholder="7500"
+                     [style.border-color]="form.get('units_per_batch')!.invalid && form.get('units_per_batch')!.touched ? '#dc2626' : ''">
             </div>
 
             <!-- Ingredients table -->
@@ -309,7 +319,7 @@ interface IngLine {
                       </span>
                       <span style="font-size:12px;color:#6B7280;">·</span>
                       <span style="font-size:12px;color:#6B7280;">
-                        <strong style="color:#374151;">{{ batchUnitsFromKg(r.batch_size_kg) | number }} units</strong>
+                        <strong style="color:#374151;">{{ r.units_per_batch | number }} units</strong>
                         ({{ r.batch_size_kg }} kg raw)
                       </span>
                       <span style="font-size:12px;color:#6B7280;">·</span>
@@ -458,7 +468,7 @@ export class RecipesAdminComponent implements OnInit {
     const n = Number(units);
     this.selectedBatchUnits.set(n);
     const opt = this.BATCH_OPTIONS.find(o => o.units === n);
-    if (opt) this.form.patchValue({ batch_size_kg: opt.rawMaterialKg });
+    if (opt) this.form.patchValue({ batch_size_kg: opt.rawMaterialKg, units_per_batch: opt.units });
   }
 
   batchUnitsFromKg(kg: number): number {
@@ -500,8 +510,9 @@ export class RecipesAdminComponent implements OnInit {
   );
 
   form = this.fb.nonNullable.group({
-    name:          ['', Validators.required],
-    batch_size_kg: [15, [Validators.required, Validators.min(0.1)]],
+    name:            ['', Validators.required],
+    batch_size_kg:   [15, [Validators.required, Validators.min(0.1)]],
+    units_per_batch: [7500, [Validators.required, Validators.min(1)]],
   });
 
   async ngOnInit(): Promise<void> {
@@ -538,7 +549,7 @@ export class RecipesAdminComponent implements OnInit {
   openNewForm(): void {
     this.editId.set(null);
     this.selectedBatchUnits.set(7500);
-    this.form.reset({ name: '', batch_size_kg: 15 });
+    this.form.reset({ name: '', batch_size_kg: 15, units_per_batch: 7500 });
     this.selectedFlavorId.set('');
     this.ingLines.set([{ ingredientId: '', ingredientName: '', quantity: 0, unit: 'g' }]);
     this.formError.set('');
@@ -550,7 +561,7 @@ export class RecipesAdminComponent implements OnInit {
     this.editId.set(r.id);
     const batchOpt = this.BATCH_OPTIONS.find(o => o.rawMaterialKg === r.batch_size_kg) ?? this.BATCH_OPTIONS[0];
     this.selectedBatchUnits.set(batchOpt.units);
-    this.form.setValue({ name: r.name, batch_size_kg: r.batch_size_kg });
+    this.form.setValue({ name: r.name, batch_size_kg: r.batch_size_kg, units_per_batch: r.units_per_batch });
     this.selectedFlavorId.set(r.flavor_id);
     this.ingLines.set(
       r.ingredients.length > 0
@@ -575,7 +586,7 @@ export class RecipesAdminComponent implements OnInit {
     this.editId.set(null);
     const cloneBatchOpt = this.BATCH_OPTIONS.find(o => o.rawMaterialKg === r.batch_size_kg) ?? this.BATCH_OPTIONS[0];
     this.selectedBatchUnits.set(cloneBatchOpt.units);
-    this.form.setValue({ name: `${r.name} Copy`, batch_size_kg: r.batch_size_kg });
+    this.form.setValue({ name: `${r.name} Copy`, batch_size_kg: r.batch_size_kg, units_per_batch: r.units_per_batch });
     this.selectedFlavorId.set(r.flavor_id);
     this.ingLines.set(
       r.ingredients.map(i => ({ ingredientId: i.ingredient_id, ingredientName: i.name, quantity: i.quantity, unit: i.unit }))
@@ -624,6 +635,7 @@ export class RecipesAdminComponent implements OnInit {
         name: v.name,
         flavor_id: flavorId,
         batch_size_kg: v.batch_size_kg,
+        units_per_batch: v.units_per_batch,
         is_active: true,
       };
 
@@ -690,7 +702,7 @@ export class RecipesAdminComponent implements OnInit {
     const [{ data: recipesData }, { data: recipeLines }] = await Promise.all([
       this.supabase.client
         .from('gg_recipes')
-        .select('id, name, flavor_id, batch_size_kg, is_active, gg_flavors(name)')
+        .select('id, name, flavor_id, batch_size_kg, units_per_batch, is_active, gg_flavors(name)')
         .order('created_at', { ascending: false }),
       this.supabase.client
         .from('recipe_lines')
@@ -722,6 +734,7 @@ export class RecipesAdminComponent implements OnInit {
       flavor_id: r.flavor_id,
       flavor_name: r.gg_flavors?.name ?? 'Unknown',
       batch_size_kg: r.batch_size_kg,
+      units_per_batch: r.units_per_batch ?? 7500,
       is_active: r.is_active,
       ingredients: linesByRecipeId.get(r.id) ?? [],
     })));

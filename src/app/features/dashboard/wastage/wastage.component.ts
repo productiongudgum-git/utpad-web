@@ -326,7 +326,7 @@ export class WastageComponent implements OnInit {
     const [batchesRes, packingRes, actualsRes] = await Promise.all([
       this.supabase.client
         .from('production_batches')
-        .select('id, batch_code, batch_number, flavor_id, production_date, actual_yield, planned_yield, recipe_snapshot, flavor:gg_flavors!production_batches_flavor_id_fkey(name)')
+        .select('id, batch_code, batch_number, flavor_id, production_date, actual_yield, planned_yield, recipe_snapshot, flavor:gg_flavors!production_batches_flavor_id_fkey(name), recipe:gg_recipes(units_per_batch, batch_size_kg)')
         .order('production_date', { ascending: false })
         .limit(500),
       this.supabase.client
@@ -374,8 +374,15 @@ export class WastageComponent implements OnInit {
       // 1. Wastage = what went in - what came out (kg).
       const kgWasted = Math.max(0, rawMaterialKg - actualYieldKg);
 
-      // Expected units = actual yield weight / 1.4 g per piece.
-      const expectedUnits = Math.round((actualYieldKg * 1000) / GRAMS_PER_UNIT);
+      // Expected units = actual yield scaled by the recipe's units/kg ratio
+      // (units_per_batch / batch_size_kg). Falls back to the 1.4 g/piece
+      // constant if the recipe isn't linked.
+      const recipeUnits   = Number((p.recipe as any)?.units_per_batch) || 0;
+      const recipeBatchKg = Number((p.recipe as any)?.batch_size_kg) || 0;
+      const pcsPerKg = (recipeUnits > 0 && recipeBatchKg > 0)
+        ? recipeUnits / recipeBatchKg
+        : 1000 / GRAMS_PER_UNIT;
+      const expectedUnits = Math.round(actualYieldKg * pcsPerKg);
 
       // Units packed = boxes actually packed for this batch x 15 pieces/box.
       const boxesPacked = packedByKey.get(`${p.batch_code}::${p.flavor_id}`) ?? 0;

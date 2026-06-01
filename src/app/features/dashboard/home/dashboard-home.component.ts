@@ -345,7 +345,7 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
           .select('ingredient_id, current_qty, low_stock_threshold'),
         // Today's production batches
         this.supabase.client.from('production_batches')
-          .select('batch_code, planned_yield, actual_yield, flavor:gg_flavors!production_batches_flavor_id_fkey(name)')
+          .select('batch_code, planned_yield, actual_yield, flavor:gg_flavors!production_batches_flavor_id_fkey(name), recipe:gg_recipes(units_per_batch)')
           .eq('production_date', today),
         // Yesterday's production batches (for comparison)
         this.supabase.client.from('production_batches')
@@ -385,13 +385,18 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
 
       const warnings: PackingWarning[] = [];
       for (const prod of todayBatches) {
-        const plannedYield: number = (prod as any).planned_yield ?? 7500;
-        const expectedBoxes = plannedYield >= 10000 ? 667 : 500;
+        const plannedYield: number = (prod as any).planned_yield ?? 0;
+        // Recipe-driven expected boxes (units_per_batch / 15 pieces per box).
+        // Falls back to 500 if no recipe is linked.
+        const unitsPerBatch: number = (prod as any).recipe?.units_per_batch ?? 7500;
+        const expectedBoxes = Math.round(unitsPerBatch / 15);
         const batchCode: string = (prod as any).batch_code ?? '';
         const packedBoxes = packTodayMap.get(batchCode) ?? 0;
         const boxesShort = Math.max(0, expectedBoxes - packedBoxes);
         if (boxesShort > 0) {
-          const kgsPending = Math.round(boxesShort * plannedYield / expectedBoxes);
+          const kgsPending = expectedBoxes > 0
+            ? Math.round(boxesShort * plannedYield / expectedBoxes)
+            : 0;
           warnings.push({
             batchCode,
             flavorName:   (prod as any).flavor?.name ?? 'Unknown',

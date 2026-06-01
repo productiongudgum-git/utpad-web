@@ -132,7 +132,8 @@ type State = 'idle' | 'parsing' | 'preview' | 'committing' | 'results';
         <div class="ri-footer">
           @if (state() === 'preview') {
             <button (click)="onCancel()" class="ri-btn ri-btn-sec">Cancel</button>
-            <button (click)="onConfirm()" class="ri-btn ri-btn-pri" [disabled]="preview()!.lineCount === 0">
+            <button (click)="onConfirm()" class="ri-btn ri-btn-pri"
+                    [disabled]="preview()!.lineCount === 0 || preview()!.missingUnits.length > 0">
               <span class="material-icons-round" style="font-size:16px;">cloud_upload</span>
               Create {{ preview()!.recipeCount }} recipes
             </button>
@@ -197,8 +198,9 @@ export class RecipeImportModalComponent {
     try {
       const rows = await this.importer.parseCsv(file);
       const cells = this.importer.parseGrid(rows);
+      const unitsByFlavor = this.importer.parseUnitsByFlavor(rows);
       const catalogs = await this.importer.loadCatalogs();
-      const preview = this.importer.buildPreview(cells, catalogs);
+      const preview = this.importer.buildPreview(cells, catalogs, unitsByFlavor);
       this.preview.set(preview);
       this.state.set('preview');
     } catch (err) {

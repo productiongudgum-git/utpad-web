@@ -24,7 +24,8 @@ import { SupabaseService } from '../../../core/supabase.service';
  */
 
 const BATCH_PCS = 7500;
-const FLAVOUR_ROW = 'flavour'; // the generic row that expands per flavor
+const FLAVOUR_ROW = 'flavour';      // the generic row that expands per flavor
+const UNITS_ROW   = 'no of units';  // per-flavor expected unit count (not an ingredient)
 
 /** Derive a gg_flavors.code from a flavor name. "Mellow Mint" → "MELLOW-MINT". */
 function makeCode(name: string): string {
@@ -52,6 +53,10 @@ export interface RecipePreview {
   lineCount: number;
   /** per-flavor total grams → batch_size_kg */
   batchKgByFlavor: Record<string, number>;
+  /** per-flavor expected unit count from the "No of units" row */
+  unitsByFlavor: Record<string, number>;
+  /** flavors whose units cell was blank/0 — these block the import */
+  missingUnits: string[];
   warnings: string[];
 }
 
@@ -102,6 +107,8 @@ export class RecipeImportService {
       if (!rawName) continue;
       // Skip footer-style rows ("ALL QTY AS PER 7500 PCS")
       if (/qty\s+as\s+per/i.test(rawName)) continue;
+      // The "No of units" row is not an ingredient — handled by parseUnitsByFlavor.
+      if (rawName.toLowerCase() === UNITS_ROW) continue;
 
       for (let c = 1; c < header.length; c++) {
         const flavorName = flavorNames[c - 1];
@@ -118,6 +125,23 @@ export class RecipeImportService {
     return cells;
   }
 
+  /** Pulls the per-flavor "No of units" value from the sheet. Returns 0 when blank. */
+  parseUnitsByFlavor(rows: string[][]): Record<string, number> {
+    const out: Record<string, number> = {};
+    if (rows.length === 0) return out;
+    const header = rows[0].map((c) => (c ?? '').trim());
+    const flavorNames = header.slice(1).map((c) => c.trim());
+    const unitsRow = rows.find((row) => (row[0] ?? '').trim().toLowerCase() === UNITS_ROW);
+    if (!unitsRow) return out;
+    for (let c = 1; c < header.length; c++) {
+      const flavorName = flavorNames[c - 1];
+      if (!flavorName) continue;
+      const n = Number((unitsRow[c] ?? '').toString().replace(/,/g, '').trim());
+      out[flavorName] = Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+    }
+    return out;
+  }
+
   // ── Resolve + preview ───────────────────────────────────────────────
 
   async loadCatalogs(): Promise<Catalogs> {
@@ -131,7 +155,11 @@ export class RecipeImportService {
     };
   }
 
-  buildPreview(cells: ParsedCell[], catalogs: Catalogs): RecipePreview {
+  buildPreview(
+    cells: ParsedCell[],
+    catalogs: Catalogs,
+    unitsByFlavor: Record<string, number> = {},
+  ): RecipePreview {
     const norm = (s: string) => s.trim().toLowerCase();
     const existingFlavors = new Set(catalogs.flavors.map((f) => norm(f.name)));
     const existingIngredients = new Set(catalogs.ingredients.map((i) => norm(i.name)));
@@ -150,9 +178,18 @@ export class RecipeImportService {
       batchKgByFlavor[f] = Math.round((batchKgByFlavor[f] / 1000) * 1000) / 1000; // g → kg
     }
 
+    // Any flavor with cells but no positive units value is blocking — the user
+    // must fix the sheet and re-upload before we can commit.
+    const missingUnits = flavorNames.filter((f) => !(unitsByFlavor[f] > 0));
+
     const warnings: string[] = [];
     if (cells.length === 0) warnings.push('No quantity cells found — is the file empty or wrong shape?');
     if (flavorNames.length === 0) warnings.push('No flavor columns detected in the header row.');
+    if (missingUnits.length > 0) {
+      warnings.push(
+        `"No of units" is missing for ${missingUnits.length} flavor${missingUnits.length === 1 ? '' : 's'}: ${missingUnits.join(', ')}. Fill them in and re-upload.`
+      );
+    }
 
     return {
       flavorNames,
@@ -163,6 +200,8 @@ export class RecipeImportService {
       recipeCount: flavorNames.length,
       lineCount: cells.length,
       batchKgByFlavor,
+      unitsByFlavor,
+      missingUnits,
       warnings,
     };
   }
@@ -233,6 +272,7 @@ export class RecipeImportService {
         name: `${flavorName} Recipe`,
         flavor_id: flavorId,
         batch_size_kg: preview.batchKgByFlavor[flavorName] ?? 0,
+        units_per_batch: preview.unitsByFlavor[flavorName] || 7500,
         is_active: true,
       };
 
