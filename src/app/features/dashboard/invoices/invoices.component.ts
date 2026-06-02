@@ -3,6 +3,7 @@ import { CommonModule, DatePipe } from '@angular/common';
 import { FormBuilder, ReactiveFormsModule, Validators, FormsModule } from '@angular/forms';
 import { SupabaseService } from '../../../core/supabase.service';
 import { CsvImportModalComponent } from './csv-import-modal.component';
+import { PdfImportModalComponent } from './pdf-import-modal.component';
 
 interface Customer { id: string; name: string; }
 interface Flavor   { id: string; name: string; }
@@ -30,7 +31,7 @@ interface InvoiceRow {
 @Component({
   selector: 'app-invoices',
   standalone: true,
-  imports: [CommonModule, DatePipe, ReactiveFormsModule, FormsModule, CsvImportModalComponent],
+  imports: [CommonModule, DatePipe, ReactiveFormsModule, FormsModule, CsvImportModalComponent, PdfImportModalComponent],
   styles: [`
     .inv-label { display:block; font-size:12px; font-weight:600; color:#374151; margin-bottom:6px; }
     .inv-toast { position:fixed; bottom:24px; right:24px; z-index:9999; padding:12px 18px; border-radius:10px; background:#1a1a1a; color:#fff; font-size:14px; font-weight:500; display:flex; align-items:center; gap:8px; box-shadow:0 4px 20px rgba(0,0,0,0.25); animation:slideUp 0.2s ease; }
@@ -61,11 +62,17 @@ interface InvoiceRow {
           <p style="color:#6B7280;font-size:14px;margin:0;">Create and manage customer invoices.</p>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <button (click)="openImport()" [disabled]="showForm() || showImport()"
+          <button (click)="openImport()" [disabled]="showForm() || showImport() || showPdfImport()"
                   style="padding:9px 16px;background:#fff;color:#01AC51;border:1px solid #01AC51;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;"
-                  [style.opacity]="(showForm() || showImport()) ? '0.6' : '1'">
+                  [style.opacity]="(showForm() || showImport() || showPdfImport()) ? '0.6' : '1'">
             <span class="material-icons-round" style="font-size:18px;">upload_file</span>
             Import CSV
+          </button>
+          <button (click)="openPdfImport()" [disabled]="showForm() || showImport() || showPdfImport()"
+                  style="padding:9px 16px;background:#fff;color:#01AC51;border:1px solid #01AC51;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;"
+                  [style.opacity]="(showForm() || showImport() || showPdfImport()) ? '0.6' : '1'">
+            <span class="material-icons-round" style="font-size:18px;">picture_as_pdf</span>
+            Import PDF
           </button>
           <button (click)="openForm()" [disabled]="showForm()"
                   style="padding:9px 18px;background:#01AC51;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;"
@@ -419,6 +426,11 @@ interface InvoiceRow {
       <app-csv-import-modal (closed)="onImportClosed($event)"></app-csv-import-modal>
     }
 
+    <!-- PDF Import Modal -->
+    @if (showPdfImport()) {
+      <app-pdf-import-modal (closed)="onPdfImportClosed($event)"></app-pdf-import-modal>
+    }
+
     <style>
       @media (max-width:700px) { .inv-top-grid { grid-template-columns: 1fr !important; } }
     </style>
@@ -431,7 +443,8 @@ export class InvoicesComponent implements OnInit {
   loading      = signal(true);
   saving       = signal(false);
   showForm     = signal(false);
-  showImport   = signal(false);
+  showImport    = signal(false);
+  showPdfImport = signal(false);
   invoices  = signal<InvoiceRow[]>([]);
   customers = signal<Customer[]>([]);
   flavors   = signal<Flavor[]>([]);
@@ -506,6 +519,18 @@ export class InvoicesComponent implements OnInit {
       // Refresh customers (some may have been created) and invoices
       await Promise.all([this.loadCustomers(), this.loadInvoices()]);
       this.showToast('Invoices imported successfully', 'success');
+    }
+  }
+
+  openPdfImport(): void {
+    this.showPdfImport.set(true);
+  }
+
+  async onPdfImportClosed(event: { imported: boolean }): Promise<void> {
+    this.showPdfImport.set(false);
+    if (event.imported) {
+      await Promise.all([this.loadCustomers(), this.loadInvoices()]);
+      this.showToast('PDF invoice imported', 'success');
     }
   }
 
