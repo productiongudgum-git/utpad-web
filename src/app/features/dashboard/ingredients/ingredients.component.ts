@@ -601,6 +601,7 @@ export class IngredientsComponent implements OnInit {
       { data: vi },
       { data: recipeLines },
       { data: flavorsData },
+      { data: recipesData },
     ] = await Promise.all([
       this.supabase.client
         .from('gg_ingredients')
@@ -620,6 +621,9 @@ export class IngredientsComponent implements OnInit {
         .select('id, name')
         .eq('active', true)
         .order('name'),
+      this.supabase.client
+        .from('gg_recipes')
+        .select('id, flavor_id, units_per_batch'),
     ]);
 
     this.flavors.set((flavorsData ?? []) as { id: string; name: string }[]);
@@ -651,16 +655,43 @@ export class IngredientsComponent implements OnInit {
     });
     const totalRecipes = allRecipeIds.size;
 
+    // Per-flavour units_per_batch + overall average — used by packing-material math.
+    const recipesArr = (recipesData ?? []) as Array<{ id: string; flavor_id: string; units_per_batch: number }>;
+    const unitsByFlavorId = new Map<string, number>();
+    for (const r of recipesArr) {
+      if (r.flavor_id) unitsByFlavorId.set(r.flavor_id, r.units_per_batch ?? 7500);
+    }
+    const avgUnitsPerBatch = recipesArr.length > 0
+      ? recipesArr.reduce((s, r) => s + (r.units_per_batch ?? 7500), 0) / recipesArr.length
+      : 7500;
+
     this.ingredients.set((ings ?? []).map((i: any) => {
       const currentStock = inventoryMap.get(i.id)?.current_qty ?? 0;
-      const u = usageByIng.get(i.id);
-      const recipeCount = u?.count ?? 0;
-      const avgPerBatch = u && u.count > 0 ? u.sum / u.count : 0;
-      const batchesLeft = avgPerBatch > 0 ? Math.floor(currentStock / avgPerBatch) : null;
 
-      // A base ingredient (used in most/all recipes) gets the higher low
-      // threshold so it's flagged with more lead time.
-      const shared = totalRecipes > 0 && recipeCount / totalRecipes >= SHARED_RECIPE_FRACTION;
+      let avgPerBatch = 0;
+      let recipeCount = 0;
+      let shared      = false;
+
+      if (i.packing_role) {
+        // Packing material (monocarton / ziplock / other) — consumed per box,
+        // not via recipe_lines. boxes per batch = units_per_batch / 15.
+        const qtyPerBox      = Number(i.qty_per_box) || 1;
+        const flavorSpecific = !!i.packing_flavor_id;
+        const upb            = flavorSpecific
+          ? (unitsByFlavorId.get(i.packing_flavor_id) ?? avgUnitsPerBatch)
+          : avgUnitsPerBatch;
+        avgPerBatch = qtyPerBox * (upb / 15);
+        recipeCount = flavorSpecific ? 1 : recipesArr.length;
+        shared      = !flavorSpecific;
+      } else {
+        // Recipe ingredient — mean qty across the recipes that use it.
+        const u     = usageByIng.get(i.id);
+        recipeCount = u?.count ?? 0;
+        avgPerBatch = u && u.count > 0 ? u.sum / u.count : 0;
+        shared      = totalRecipes > 0 && recipeCount / totalRecipes >= SHARED_RECIPE_FRACTION;
+      }
+
+      const batchesLeft  = avgPerBatch > 0 ? Math.floor(currentStock / avgPerBatch) : null;
       const lowThreshold = shared ? LOW_BATCHES_SHARED : LOW_BATCHES_DEFAULT;
 
       return {

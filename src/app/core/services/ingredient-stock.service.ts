@@ -52,11 +52,22 @@ export class IngredientStockService {
   async refresh(): Promise<void> {
     this.loading.set(true);
     try {
-      const [ingredientsRes, inventoryRes, recipeLinesRes] = await Promise.all([
-        this.supabase.client.from('gg_ingredients').select('id, name, default_unit').order('name'),
+      const [ingredientsRes, inventoryRes, recipeLinesRes, recipesRes] = await Promise.all([
+        this.supabase.client.from('gg_ingredients').select('id, name, default_unit, packing_role, packing_flavor_id, qty_per_box').order('name'),
         this.supabase.client.from('inventory_raw_materials').select('ingredient_id, current_qty, unit'),
         this.supabase.client.from('recipe_lines').select('recipe_id, ingredient_id, qty'),
+        this.supabase.client.from('gg_recipes').select('id, flavor_id, units_per_batch'),
       ]);
+
+      // Per-flavour units_per_batch + overall average (drives packing-material math).
+      const recipes = (recipesRes.data ?? []) as Array<{ id: string; flavor_id: string; units_per_batch: number }>;
+      const unitsByFlavorId = new Map<string, number>();
+      for (const r of recipes) {
+        if (r.flavor_id) unitsByFlavorId.set(r.flavor_id, r.units_per_batch ?? 7500);
+      }
+      const avgUnitsPerBatch = recipes.length > 0
+        ? recipes.reduce((s, r) => s + (r.units_per_batch ?? 7500), 0) / recipes.length
+        : 7500;
 
       const inventoryByIngredientId = new Map<string, any>();
       (inventoryRes.data ?? []).forEach((row: any) => inventoryByIngredientId.set(row.ingredient_id, row));
@@ -78,12 +89,33 @@ export class IngredientStockService {
         (ingredientsRes.data ?? []).map((i: any) => {
           const inventory    = inventoryByIngredientId.get(i.id);
           const currentStock = inventory?.current_qty ?? 0;
-          const u            = usageByIng.get(i.id);
-          const recipeCount  = u?.count ?? 0;
-          const avgPerBatch  = u && u.count > 0 ? u.sum / u.count : 0;
+
+          let avgPerBatch = 0;
+          let recipeCount = 0;
+          let shared      = false;
+
+          if (i.packing_role) {
+            // Packing material — consumed per box, not via recipe_lines.
+            // boxes per batch = units_per_batch / 15 pieces per box.
+            const qtyPerBox      = Number(i.qty_per_box) || 1;
+            const flavorSpecific = !!i.packing_flavor_id;
+            const upb            = flavorSpecific
+              ? (unitsByFlavorId.get(i.packing_flavor_id) ?? avgUnitsPerBatch)
+              : avgUnitsPerBatch;
+            avgPerBatch = qtyPerBox * (upb / 15);
+            recipeCount = flavorSpecific ? 1 : recipes.length;
+            shared      = !flavorSpecific;   // generic packing material is "used everywhere"
+          } else {
+            // Recipe ingredient — mean qty across the recipes that use it.
+            const u     = usageByIng.get(i.id);
+            recipeCount = u?.count ?? 0;
+            avgPerBatch = u && u.count > 0 ? u.sum / u.count : 0;
+            shared      = totalRecipes > 0 && recipeCount / totalRecipes >= SHARED_RECIPE_FRACTION;
+          }
+
           const batchesLeft  = avgPerBatch > 0 ? Math.floor(currentStock / avgPerBatch) : null;
-          const shared       = totalRecipes > 0 && recipeCount / totalRecipes >= SHARED_RECIPE_FRACTION;
           const lowThreshold = shared ? LOW_BATCHES_SHARED : LOW_BATCHES_DEFAULT;
+
           return {
             id: i.id,
             name: i.name,
