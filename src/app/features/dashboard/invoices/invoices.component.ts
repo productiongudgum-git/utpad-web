@@ -293,13 +293,23 @@ interface InvoiceRow {
                     }
                   </td>
                   <td style="padding:14px 16px;text-align:center;">
-                    @if (!inv.is_dispatched) {
-                      <button (click)="openEdit(inv)"
-                              style="padding:5px 12px;background:#f8f9fa;border:1px solid #E5E7EB;border-radius:6px;font-size:12px;font-weight:600;color:#374151;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">
-                        <span class="material-icons-round" style="font-size:14px;">edit</span>
-                        Edit
+                    <div style="display:inline-flex;gap:6px;align-items:center;">
+                      @if (!inv.is_dispatched) {
+                        <button (click)="openEdit(inv)"
+                                style="padding:5px 12px;background:#f8f9fa;border:1px solid #E5E7EB;border-radius:6px;font-size:12px;font-weight:600;color:#374151;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">
+                          <span class="material-icons-round" style="font-size:14px;">edit</span>
+                          Edit
+                        </button>
+                      }
+                      <button (click)="deleteInvoice(inv)"
+                              [disabled]="deletingId() === inv.id"
+                              title="Delete invoice"
+                              style="padding:5px 10px;background:#fff5f5;border:1px solid #fca5a5;border-radius:6px;font-size:12px;font-weight:600;color:#dc2626;cursor:pointer;display:inline-flex;align-items:center;gap:4px;"
+                              [style.opacity]="deletingId() === inv.id ? '0.6' : '1'">
+                        <span class="material-icons-round" style="font-size:14px;">delete_outline</span>
+                        {{ deletingId() === inv.id ? 'Deleting…' : 'Delete' }}
                       </button>
-                    }
+                    </div>
                   </td>
                 </tr>
               }
@@ -445,6 +455,7 @@ export class InvoicesComponent implements OnInit {
   showForm     = signal(false);
   showImport    = signal(false);
   showPdfImport = signal(false);
+  deletingId    = signal<string | null>(null);
   invoices  = signal<InvoiceRow[]>([]);
   customers = signal<Customer[]>([]);
   flavors   = signal<Flavor[]>([]);
@@ -524,6 +535,32 @@ export class InvoicesComponent implements OnInit {
 
   openPdfImport(): void {
     this.showPdfImport.set(true);
+  }
+
+  async deleteInvoice(inv: InvoiceRow): Promise<void> {
+    // Strong confirm if the invoice is already dispatched — those are real
+    // shipped goods and removing the invoice leaves dispatch_events orphaned.
+    const baseMsg = `Delete invoice ${inv.invoice_number}?\n\nThis cannot be undone.`;
+    const dispatchedMsg = inv.is_dispatched
+      ? `\n\nWARNING: This invoice is marked DISPATCHED. Any dispatch records tagged with this invoice number will be left orphaned — your inventory deductions stay in place but the invoice they came from is gone.`
+      : '';
+    if (!confirm(baseMsg + dispatchedMsg)) return;
+
+    this.deletingId.set(inv.id);
+    try {
+      const { error } = await this.supabase.client
+        .from('gg_invoices')
+        .delete()
+        .eq('id', inv.id);
+      if (error) {
+        this.showToast(`Delete failed: ${error.message}`, 'error');
+        return;
+      }
+      this.invoices.update((list) => list.filter((i) => i.id !== inv.id));
+      this.showToast(`Invoice ${inv.invoice_number} deleted`, 'success');
+    } finally {
+      this.deletingId.set(null);
+    }
   }
 
   async onPdfImportClosed(event: { imported: boolean }): Promise<void> {
