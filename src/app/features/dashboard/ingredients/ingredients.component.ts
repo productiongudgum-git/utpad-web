@@ -4,7 +4,7 @@ import { FormBuilder, ReactiveFormsModule, Validators, FormsModule } from '@angu
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { SupabaseService } from '../../../core/supabase.service';
 import { IngredientStockService } from '../../../core/services/ingredient-stock.service';
-import { formatStock, formatStockString, toCanonical } from '../../../shared/utils/unit-format';
+import { formatStockString, toCanonical } from '../../../shared/utils/unit-format';
 
 // "Batches left" tuning — how many more batches the current stock can make,
 // based purely on recipe usage (no production-pace assumption).
@@ -19,7 +19,6 @@ interface Ingredient {
   id: string;
   name: string;
   default_unit: string;
-  reorder_point: number;
   current_stock: number;
   vendor_names: string[];
   // Batches the current stock can still make (recipe-based, pace-independent).
@@ -58,7 +57,7 @@ interface Ingredient {
           <span class="material-icons-round" style="font-size:22px;color:#ea580c;flex-shrink:0;margin-top:1px;">warning_amber</span>
           <div style="flex:1;min-width:0;">
             <p style="font-size:14px;font-weight:700;color:#9a3412;margin:0 0 4px;">
-              {{ stockSvc.lowStockCount() }} ingredient{{ stockSvc.lowStockCount() === 1 ? '' : 's' }} below reorder threshold
+              {{ stockSvc.lowStockCount() }} ingredient{{ stockSvc.lowStockCount() === 1 ? '' : 's' }} low on batches
             </p>
             <p style="font-size:13px;color:#c2410c;margin:0;line-height:1.5;">
               {{ alertSummary() }}
@@ -77,7 +76,7 @@ interface Ingredient {
       <div style="margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
         <div>
           <h1 style="font-family:'Cabin',sans-serif;font-size:22px;font-weight:700;color:var(--foreground);margin:0 0 4px;">Ingredients</h1>
-          <p style="color:#6B7280;font-size:14px;margin:0;">Master list of all raw ingredients and reorder thresholds.</p>
+          <p style="color:#6B7280;font-size:14px;margin:0;">Master list of all raw ingredients and stock levels.</p>
         </div>
         <button (click)="openNewForm()"
                 style="padding:9px 18px;background:#01AC51;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;">
@@ -109,18 +108,6 @@ interface Ingredient {
                   <option value="L">L</option><option value="ml">ml</option>
                   <option value="pcs">pcs</option><option value="boxes">boxes</option>
                 </select>
-              </div>
-              <div>
-                <label class="ing-label">
-                  Reorder Point
-                  <span style="font-weight:400;color:#9CA3AF;">(alert when stock falls below)</span>
-                </label>
-                <div style="position:relative;">
-                  <input formControlName="reorder_point" type="number" min="0" step="0.01" class="gg-input" placeholder="e.g. 5">
-                  <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:12px;color:#9CA3AF;pointer-events:none;">
-                    {{ form.get('default_unit')?.value }}
-                  </span>
-                </div>
               </div>
               <div>
                 <label class="ing-label">Current Stock</label>
@@ -230,7 +217,7 @@ interface Ingredient {
             {{ ingredients().length === 0 ? 'No ingredients yet' : 'No ingredients match your search' }}
           </p>
           <p style="font-size:13px;margin:0;">
-            {{ showLowStockOnly() ? 'All ingredients are above their reorder threshold.' : 'Try adjusting your search or filters.' }}
+            {{ showLowStockOnly() ? 'All ingredients have enough batches left.' : 'Try adjusting your search or filters.' }}
           </p>
         </div>
       } @else {
@@ -255,7 +242,6 @@ interface Ingredient {
                           [style.color]="sortActive('batches') ? '#01AC51' : '#9CA3AF'">{{ sortIcon('batches') }}</span>
                   </span>
                 </th>
-                <th style="text-align:left;padding:11px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Reorder Point</th>
                 <th style="text-align:left;padding:11px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Vendors</th>
                 <th style="text-align:center;padding:11px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Actions</th>
               </tr>
@@ -263,12 +249,12 @@ interface Ingredient {
             <tbody>
               @for (ing of filteredIngredients(); track ing.id) {
                 <tr style="border-bottom:1px solid #f3f4f6;transition:background 0.1s;"
-                    [style.background]="(isLow(ing) || isLowBatches(ing)) ? '#fff7ed' : 'transparent'">
+                    [style.background]="isLowBatches(ing) ? '#fff7ed' : 'transparent'">
 
                   <!-- Name -->
                   <td style="padding:12px 16px;">
                     <div style="display:flex;align-items:center;gap:8px;">
-                      @if (isLow(ing)) {
+                      @if (isLowBatches(ing)) {
                         <span class="material-icons-round" style="font-size:16px;"
                               [style.color]="ing.current_stock === 0 ? '#dc2626' : '#ea580c'">
                           {{ ing.current_stock === 0 ? 'dangerous' : 'warning_amber' }}
@@ -288,27 +274,11 @@ interface Ingredient {
                     </div>
                   </td>
 
-                  <!-- Current stock + bar -->
+                  <!-- Current stock -->
                   <td style="padding:12px 12px;">
-                    <div style="display:flex;align-items:center;gap:8px;">
-                      <span style="font-size:13px;font-weight:700;min-width:64px;"
-                            [style.color]="stockColor(ing)">
-                        {{ fmtStock(ing.current_stock, ing.default_unit) }}
-                      </span>
-                      @if (ing.reorder_point > 0) {
-                        <div style="flex:1;height:6px;border-radius:3px;background:#f3f4f6;min-width:60px;max-width:120px;overflow:hidden;">
-                          <div style="height:100%;border-radius:3px;transition:width 0.3s;"
-                               [style.width]="stockBarWidth(ing) + '%'"
-                               [style.background]="stockColor(ing)">
-                          </div>
-                        </div>
-                      }
-                    </div>
-                    @if (isLow(ing) && ing.reorder_point > 0) {
-                      <p style="font-size:11px;color:#ea580c;margin:3px 0 0;">
-                        needs {{ fmtStock(ing.reorder_point - ing.current_stock, ing.default_unit) }} more
-                      </p>
-                    }
+                    <span style="font-size:13px;font-weight:700;color:#374151;">
+                      {{ fmtStock(ing.current_stock, ing.default_unit) }}
+                    </span>
                   </td>
 
                   <!-- Batches left (recipe-based) -->
@@ -326,39 +296,6 @@ interface Ingredient {
                       <p style="font-size:11px;color:#9CA3AF;margin:3px 0 0;">
                         ≈ {{ fmtStock(ing.avgPerBatch, ing.default_unit) }}/batch{{ ing.recipeCount > 1 ? ' avg' : '' }}
                       </p>
-                    }
-                  </td>
-
-                  <!-- Reorder point (inline editable) -->
-                  <td style="padding:12px 12px;">
-                    @if (editingThresholdId() === ing.id) {
-                      <div style="display:flex;align-items:center;gap:6px;">
-                        <input [(ngModel)]="pendingThreshold" type="number" min="0" step="0.01"
-                               (keydown.enter)="saveThreshold(ing)"
-                               (keydown.escape)="editingThresholdId.set(null)"
-                               style="width:80px;padding:4px 8px;border:1px solid #01AC51;border-radius:6px;font-size:13px;outline:none;"
-                               #threshInput>
-                        <span style="font-size:12px;color:#6B7280;">{{ pendingThresholdUnit }}</span>
-                        <button (click)="saveThreshold(ing)"
-                                style="border:none;background:#01AC51;color:#fff;border-radius:5px;padding:3px 8px;font-size:12px;font-weight:600;cursor:pointer;">✓</button>
-                        <button (click)="editingThresholdId.set(null)"
-                                style="border:none;background:#f3f4f6;color:#6B7280;border-radius:5px;padding:3px 6px;font-size:12px;cursor:pointer;">✕</button>
-                      </div>
-                    } @else {
-                      <div style="display:flex;align-items:center;gap:6px;">
-                        @if (ing.reorder_point > 0) {
-                          <span style="font-size:13px;font-weight:600;"
-                                [style.color]="isLow(ing) ? '#ea580c' : '#6B7280'">
-                            {{ fmtStock(ing.reorder_point, ing.default_unit) }}
-                          </span>
-                        } @else {
-                          <span style="font-size:13px;color:#d1d5db;font-style:italic;">Not set</span>
-                        }
-                        <button (click)="startThresholdEdit(ing)" title="Edit reorder point"
-                                style="border:none;background:none;cursor:pointer;color:#9CA3AF;display:flex;align-items:center;padding:2px;">
-                          <span class="material-icons-round" style="font-size:14px;">edit</span>
-                        </button>
-                      </div>
                     }
                   </td>
 
@@ -414,9 +351,6 @@ export class IngredientsComponent implements OnInit {
   toastKind = signal<'success' | 'error'>('success');
 
   // Inline threshold editor
-  editingThresholdId = signal<string | null>(null);
-  pendingThreshold = 0;
-  pendingThresholdUnit = '';
 
   // Filters
   showLowStockOnly = signal(false);
@@ -431,7 +365,7 @@ export class IngredientsComponent implements OnInit {
     let list = this.ingredients();
     const q = this.searchSig().toLowerCase().trim();
     if (q) list = list.filter(i => i.name.toLowerCase().includes(q));
-    if (this.showLowStockOnly()) list = list.filter(i => this.isLow(i));
+    if (this.showLowStockOnly()) list = list.filter(i => this.isLowBatches(i));
 
     const key = this.sortKey();
     if (key) {
@@ -447,7 +381,7 @@ export class IngredientsComponent implements OnInit {
   readonly alertSummary = computed(() => {
     const items = this.stockSvc.lowStockIngredients();
     if (items.length === 0) return '';
-    const names = items.slice(0, 3).map(i => `${i.name} (${i.current_stock} ${i.default_unit})`);
+    const names = items.slice(0, 3).map(i => `${i.name} (${i.batchesLeft} batches)`);
     const rest = items.length > 3 ? ` and ${items.length - 3} more` : '';
     return names.join(', ') + rest;
   });
@@ -455,7 +389,6 @@ export class IngredientsComponent implements OnInit {
   form = this.fb.nonNullable.group({
     name:          ['', Validators.required],
     default_unit:  ['kg', Validators.required],
-    reorder_point: [0],
     current_stock: [0],
     packing_role:      [''],   // '' | 'monocarton' | 'ziplock' | 'other'
     packing_flavor_id: [''],   // required only when role = monocarton
@@ -501,26 +434,6 @@ export class IngredientsComponent implements OnInit {
     return this.sortKey() === key;
   }
 
-  // ── Stock helpers ─────────────────────────────────────────────────────
-
-  isLow(ing: Ingredient): boolean {
-    return ing.reorder_point > 0 && ing.current_stock <= ing.reorder_point;
-  }
-
-  stockColor(ing: Ingredient): string {
-    if (ing.reorder_point <= 0) return '#6B7280';
-    if (ing.current_stock === 0) return '#dc2626';
-    if (ing.current_stock <= ing.reorder_point * 0.5) return '#dc2626';
-    if (ing.current_stock <= ing.reorder_point) return '#ea580c';
-    return '#16a34a';
-  }
-
-  stockBarWidth(ing: Ingredient): number {
-    if (ing.reorder_point <= 0 || ing.current_stock <= 0) return 0;
-    // Bar = % of (reorder_point × 2) so 100% means 2× safe stock
-    return Math.min(100, (ing.current_stock / (ing.reorder_point * 2)) * 100);
-  }
-
   // ── Batches left ──────────────────────────────────────────────────────
 
   isLowBatches(ing: Ingredient): boolean {
@@ -554,41 +467,11 @@ export class IngredientsComponent implements OnInit {
     return `${this.fmtStock(ing.avgPerBatch, ing.default_unit)} per batch${across}. ${tier}.`;
   }
 
-  // ── Inline threshold editor ───────────────────────────────────────────
-
-  startThresholdEdit(ing: Ingredient): void {
-    this.editingThresholdId.set(ing.id);
-    // Show the editor in the same auto-scaled unit as the display
-    // (e.g. 2000 g of reorder_point opens as "2" with label "kg").
-    const f = formatStock(ing.reorder_point, ing.default_unit);
-    this.pendingThreshold = f.qty;
-    this.pendingThresholdUnit = f.unit || ing.default_unit;
-  }
-
-  async saveThreshold(ing: Ingredient): Promise<void> {
-    const entered = Math.max(0, Number(this.pendingThreshold) || 0);
-    // Convert whatever unit the editor is showing back to canonical (g/ml/pcs).
-    const canonical = toCanonical(entered, this.pendingThresholdUnit);
-    const { error } = await this.supabase.client
-      .from('inventory_raw_materials')
-      .upsert({
-        ingredient_id: ing.id,
-        current_qty: ing.current_stock,
-        unit: ing.default_unit,
-        low_stock_threshold: canonical.qty,
-      }, { onConflict: 'ingredient_id' });
-    if (error) { this.showToast(error.message, 'error'); return; }
-    this.editingThresholdId.set(null);
-    this.showToast(`Reorder point updated to ${entered} ${this.pendingThresholdUnit}`, 'success');
-    await this.loadData();
-    void this.stockSvc.refresh();
-  }
-
   // ── Form ──────────────────────────────────────────────────────────────
 
   openNewForm(): void {
     this.editId.set(null);
-    this.form.reset({ name: '', default_unit: 'kg', reorder_point: 0, current_stock: 0, packing_role: '', packing_flavor_id: '', qty_per_box: 1 });
+    this.form.reset({ name: '', default_unit: 'kg', current_stock: 0, packing_role: '', packing_flavor_id: '', qty_per_box: 1 });
     this.formError.set('');
     this.showForm.set(true);
   }
@@ -598,7 +481,6 @@ export class IngredientsComponent implements OnInit {
     this.form.setValue({
       name: ing.name,
       default_unit: ing.default_unit,
-      reorder_point: ing.reorder_point,
       current_stock: ing.current_stock,
       packing_role: ing.packingRole ?? '',
       packing_flavor_id: ing.packingFlavorId ?? '',
@@ -630,12 +512,9 @@ export class IngredientsComponent implements OnInit {
     // accepts kg/L/g/ml/pcs/boxes but the DB stores only g/ml/pcs (boxes
     // pass through). 5 kg input becomes 5000 g in the database.
     const enteredStock  = Math.max(0, Number(v.current_stock) || 0);
-    const enteredReorder = Math.max(0, Number(v.reorder_point) || 0);
-    const canonicalStock  = toCanonical(enteredStock,  formUnit);
-    const canonicalReorder = toCanonical(enteredReorder, formUnit);
+    const canonicalStock = toCanonical(enteredStock, formUnit);
     const normalizedUnit = canonicalStock.unit;
     const normalizedCurrentStock = canonicalStock.qty;
-    const normalizedReorderPoint = canonicalReorder.qty;
 
     // Packing-material mapping. Flavour link only applies to monocartons;
     // ziplock/other are generic (consumed for every flavour).
@@ -683,7 +562,6 @@ export class IngredientsComponent implements OnInit {
         ingredient_id: ingredientId,
         current_qty: normalizedCurrentStock,
         unit: normalizedUnit,
-        low_stock_threshold: normalizedReorderPoint,
       }, { onConflict: 'ingredient_id' });
     if (inventoryError) {
       this.formError.set(inventoryError.message);
@@ -730,7 +608,7 @@ export class IngredientsComponent implements OnInit {
         .order('name'),
       this.supabase.client
         .from('inventory_raw_materials')
-        .select('ingredient_id, current_qty, unit, low_stock_threshold'),
+        .select('ingredient_id, current_qty, unit'),
       this.supabase.client
         .from('gg_vendor_ingredients')
         .select('ingredient_id, gg_vendors(name)'),
@@ -788,7 +666,6 @@ export class IngredientsComponent implements OnInit {
       return {
         id: i.id, name: i.name,
         default_unit: inventoryMap.get(i.id)?.unit ?? i.default_unit ?? 'kg',
-        reorder_point: inventoryMap.get(i.id)?.low_stock_threshold ?? 0,
         current_stock: currentStock,
         vendor_names: vendorMap.get(i.id) ?? [],
         avgPerBatch,
