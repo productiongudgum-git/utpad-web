@@ -247,7 +247,8 @@ interface Ingredient {
               </tr>
             </thead>
             <tbody>
-              @for (ing of filteredIngredients(); track ing.id) {
+              <!-- Raw materials (recipe ingredients) -->
+              @for (ing of rawIngredients(); track ing.id) {
                 <tr style="border-bottom:1px solid #f3f4f6;transition:background 0.1s;"
                     [style.background]="isLowBatches(ing) ? '#fff7ed' : 'transparent'">
 
@@ -263,13 +264,6 @@ interface Ingredient {
                       <div>
                         <span style="font-size:14px;font-weight:600;color:var(--foreground);">{{ ing.name }}</span>
                         <span style="margin-left:6px;background:#f3f4f6;color:#6B7280;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:500;">{{ ing.default_unit }}</span>
-                        @if (ing.packingRole) {
-                          <div style="margin-top:3px;">
-                            <span style="font-size:10px;font-weight:600;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:4px;padding:1px 6px;display:inline-flex;align-items:center;gap:3px;">
-                              <span class="material-icons-round" style="font-size:11px;">inventory_2</span>{{ packingLabel(ing) }}
-                            </span>
-                          </div>
-                        }
                       </div>
                     </div>
                   </td>
@@ -318,6 +312,113 @@ interface Ingredient {
                     </div>
                   </td>
                 </tr>
+              }
+
+              <!-- Packing materials — section header + collapsible groups -->
+              @if (packingGroups().length > 0) {
+                <tr>
+                  <td colspan="5" style="background:#f9fafb;padding:12px 16px;font-size:11px;font-weight:700;text-transform:uppercase;color:#6B7280;letter-spacing:0.04em;border-top:2px solid #e5e7eb;border-bottom:1px solid #e5e7eb;">
+                    Packing Materials
+                  </td>
+                </tr>
+
+                @for (group of packingGroups(); track group.key) {
+                  <!-- Group summary row (clickable to expand) -->
+                  <tr (click)="togglePackingGroup(group.key)"
+                      style="border-bottom:1px solid #f3f4f6;cursor:pointer;transition:background 0.1s;"
+                      [style.background]="group.anyLow ? '#fff7ed' : 'transparent'">
+                    <td style="padding:12px 16px;">
+                      <div style="display:flex;align-items:center;gap:8px;">
+                        <span class="material-icons-round" style="font-size:18px;color:#6B7280;">
+                          {{ isPackingExpanded(group.key) ? 'expand_more' : 'chevron_right' }}
+                        </span>
+                        @if (group.anyLow) {
+                          <span class="material-icons-round" style="font-size:16px;color:#ea580c;">warning_amber</span>
+                        }
+                        <span style="font-size:14px;font-weight:700;color:var(--foreground);">{{ group.label }}</span>
+                        <span style="font-size:11px;font-weight:500;background:#f3f4f6;color:#6B7280;padding:1px 6px;border-radius:4px;">
+                          {{ group.items.length }} SKU{{ group.items.length === 1 ? '' : 's' }}
+                        </span>
+                      </div>
+                    </td>
+                    <td style="padding:12px 12px;">
+                      <span style="font-size:13px;font-weight:700;color:#374151;">
+                        {{ fmtStock(group.totalStock, group.unit) }}
+                      </span>
+                      <p style="font-size:11px;color:#9CA3AF;margin:3px 0 0;">total across {{ group.items.length }}</p>
+                    </td>
+                    <td style="padding:12px 12px;">
+                      @if (group.worstBatchesLeft != null) {
+                        <span style="font-size:13px;font-weight:700;"
+                              [style.color]="group.anyLow ? '#dc2626' : '#16a34a'"
+                              title="Lowest batches-left across this group — the SKU closest to running out">
+                          {{ group.worstBatchesLeft }} batch{{ group.worstBatchesLeft === 1 ? '' : 'es' }}
+                        </span>
+                        <p style="font-size:11px;color:#9CA3AF;margin:3px 0 0;">worst in group</p>
+                      } @else {
+                        <span style="font-size:13px;color:#9CA3AF;">—</span>
+                      }
+                    </td>
+                    <td style="padding:12px 12px;font-size:12px;color:#9CA3AF;">—</td>
+                    <td style="padding:12px 16px;text-align:center;font-size:12px;color:#9CA3AF;">
+                      click to expand
+                    </td>
+                  </tr>
+
+                  <!-- Per-SKU sub-rows (visible when group is expanded) -->
+                  @if (isPackingExpanded(group.key)) {
+                    @for (ing of group.items; track ing.id) {
+                      <tr style="border-bottom:1px solid #f3f4f6;background:#fafafa;"
+                          [style.background]="isLowBatches(ing) ? '#fff7ed' : '#fafafa'">
+                        <td style="padding:10px 16px 10px 56px;">
+                          <div style="display:flex;align-items:center;gap:8px;">
+                            @if (isLowBatches(ing)) {
+                              <span class="material-icons-round" style="font-size:14px;"
+                                    [style.color]="ing.current_stock === 0 ? '#dc2626' : '#ea580c'">
+                                {{ ing.current_stock === 0 ? 'dangerous' : 'warning_amber' }}
+                              </span>
+                            }
+                            <span style="font-size:13px;font-weight:600;color:var(--foreground);">{{ ing.name }}</span>
+                            <span style="background:#f3f4f6;color:#6B7280;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:500;">{{ ing.default_unit }}</span>
+                            @if (ing.packingFlavorName) {
+                              <span style="font-size:10px;color:#6B7280;">· {{ ing.packingFlavorName }}</span>
+                            }
+                          </div>
+                        </td>
+                        <td style="padding:10px 12px;">
+                          <span style="font-size:13px;font-weight:600;color:#374151;">
+                            {{ fmtStock(ing.current_stock, ing.default_unit) }}
+                          </span>
+                        </td>
+                        <td style="padding:10px 12px;">
+                          <span style="font-size:13px;font-weight:700;" [style.color]="batchesColor(ing)" [title]="usageTooltip(ing)">
+                            {{ batchesLabel(ing) }}
+                          </span>
+                          @if (ing.avgPerBatch > 0) {
+                            <p style="font-size:11px;color:#9CA3AF;margin:3px 0 0;">
+                              ≈ {{ fmtStock(ing.avgPerBatch, ing.default_unit) }}/batch
+                            </p>
+                          }
+                        </td>
+                        <td style="padding:10px 12px;font-size:12px;color:#6B7280;">
+                          {{ ing.vendor_names.length ? ing.vendor_names.join(', ') : '—' }}
+                        </td>
+                        <td style="padding:10px 16px;text-align:center;">
+                          <div style="display:flex;align-items:center;justify-content:center;gap:6px;">
+                            <button (click)="startEdit(ing); $event.stopPropagation()"
+                                    style="padding:4px 10px;background:#f0fdf4;border:1px solid #01AC51;color:#01AC51;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">
+                              Edit
+                            </button>
+                            <button (click)="deleteIngredient(ing.id); $event.stopPropagation()"
+                                    style="padding:4px 10px;background:#fff5f5;border:1px solid #fca5a5;color:#dc2626;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    }
+                  }
+                }
               }
             </tbody>
           </table>
@@ -376,6 +477,63 @@ export class IngredientsComponent implements OnInit {
       list = [...list].sort((a, b) => (val(a) - val(b)) * dir);
     }
     return list;
+  });
+
+  /** Raw materials only — the main section above Packing Materials. */
+  readonly rawIngredients = computed(() =>
+    this.filteredIngredients().filter(i => !i.packingRole)
+  );
+
+  /** Expansion state per group; group rows show summary, expand reveals sub-items. */
+  readonly packingExpand = signal<Record<'monocarton' | 'ziplock', boolean>>({
+    monocarton: false,
+    ziplock:    false,
+  });
+
+  togglePackingGroup(key: 'monocarton' | 'ziplock'): void {
+    this.packingExpand.update(s => ({ ...s, [key]: !s[key] }));
+  }
+
+  isPackingExpanded(key: 'monocarton' | 'ziplock'): boolean {
+    return this.packingExpand()[key];
+  }
+
+  /** Two collapsible group rows: Monocartons + Ziplocks. Hidden if empty. */
+  readonly packingGroups = computed(() => {
+    const filtered = this.filteredIngredients().filter(i => !!i.packingRole);
+    const groups: Array<{
+      key: 'monocarton' | 'ziplock';
+      label: string;
+      items: Ingredient[];
+      totalStock: number;
+      worstBatchesLeft: number | null; // min across sub-items; null = at least one unused
+      anyLow: boolean;
+      unit: string;
+    }> = [];
+
+    for (const key of ['monocarton', 'ziplock'] as const) {
+      const items = filtered
+        .filter(i => i.packingRole === key)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      if (items.length === 0) continue;
+
+      const totalStock = items.reduce((s, i) => s + (Number(i.current_stock) || 0), 0);
+      // Worst batches-left across the group — whichever sub-item is closest to running out.
+      let worst: number | null = null;
+      for (const i of items) {
+        if (i.batchesLeft == null) continue;
+        if (worst == null || i.batchesLeft < worst) worst = i.batchesLeft;
+      }
+      const anyLow = items.some(i => this.isLowBatches(i));
+      const unit   = items[0]?.default_unit ?? 'pcs';
+
+      groups.push({
+        key,
+        label: key === 'monocarton' ? 'Monocartons' : 'Ziplocks',
+        items, totalStock, worstBatchesLeft: worst, anyLow, unit,
+      });
+    }
+    return groups;
   });
 
   readonly alertSummary = computed(() => {
@@ -602,6 +760,7 @@ export class IngredientsComponent implements OnInit {
       { data: recipeLines },
       { data: flavorsData },
       { data: recipesData },
+      { data: pmfData },
     ] = await Promise.all([
       this.supabase.client
         .from('gg_ingredients')
@@ -624,6 +783,9 @@ export class IngredientsComponent implements OnInit {
       this.supabase.client
         .from('gg_recipes')
         .select('id, flavor_id, units_per_batch'),
+      this.supabase.client
+        .from('packing_material_flavors')
+        .select('ingredient_id, flavor_id'),
     ]);
 
     this.flavors.set((flavorsData ?? []) as { id: string; name: string }[]);
@@ -665,6 +827,14 @@ export class IngredientsComponent implements OnInit {
       ? recipesArr.reduce((s, r) => s + (r.units_per_batch ?? 7500), 0) / recipesArr.length
       : 7500;
 
+    // packing_material_flavors → which flavours each packing SKU is linked to.
+    const flavorsByPackingIng = new Map<string, string[]>();
+    ((pmfData ?? []) as Array<{ ingredient_id: string; flavor_id: string }>).forEach(r => {
+      const arr = flavorsByPackingIng.get(r.ingredient_id) ?? [];
+      arr.push(r.flavor_id);
+      flavorsByPackingIng.set(r.ingredient_id, arr);
+    });
+
     this.ingredients.set((ings ?? []).map((i: any) => {
       const currentStock = inventoryMap.get(i.id)?.current_qty ?? 0;
 
@@ -673,16 +843,31 @@ export class IngredientsComponent implements OnInit {
       let shared      = false;
 
       if (i.packing_role) {
-        // Packing material (monocarton / ziplock / other) — consumed per box,
-        // not via recipe_lines. boxes per batch = units_per_batch / 15.
-        const qtyPerBox      = Number(i.qty_per_box) || 1;
-        const flavorSpecific = !!i.packing_flavor_id;
-        const upb            = flavorSpecific
-          ? (unitsByFlavorId.get(i.packing_flavor_id) ?? avgUnitsPerBatch)
-          : avgUnitsPerBatch;
+        // Packing material — consumed per box, not via recipe_lines.
+        // boxes per batch = units_per_batch / 15.
+        // Linked flavours come from (in priority): packing_flavor_id (single, monocartons)
+        // → packing_material_flavors join (subset, GG/GG+ ziplocks) → none = generic.
+        const qtyPerBox       = Number(i.qty_per_box) || 1;
+        const linkedFlavorIds: string[] = i.packing_flavor_id
+          ? [i.packing_flavor_id]
+          : (flavorsByPackingIng.get(i.id) ?? []);
+
+        let upb: number;
+        if (linkedFlavorIds.length === 0) {
+          upb         = avgUnitsPerBatch;
+          recipeCount = recipesArr.length;
+        } else {
+          const linkedUpbs = linkedFlavorIds
+            .map(fid => unitsByFlavorId.get(fid))
+            .filter((v): v is number => v != null);
+          upb = linkedUpbs.length > 0
+            ? linkedUpbs.reduce((s, v) => s + v, 0) / linkedUpbs.length
+            : avgUnitsPerBatch;
+          recipeCount = linkedFlavorIds.length;
+        }
+
         avgPerBatch = qtyPerBox * (upb / 15);
-        recipeCount = flavorSpecific ? 1 : recipesArr.length;
-        shared      = !flavorSpecific;
+        shared      = totalRecipes > 0 && recipeCount / totalRecipes >= SHARED_RECIPE_FRACTION;
       } else {
         // Recipe ingredient — mean qty across the recipes that use it.
         const u     = usageByIng.get(i.id);
