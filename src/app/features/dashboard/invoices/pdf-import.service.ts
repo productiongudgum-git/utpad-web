@@ -1,15 +1,14 @@
 import { Injectable } from '@angular/core';
 // pdfjs-dist is loaded lazily so the modal can show "Loading…" while the
-// (~1 MB) worker pulls in. The worker is fetched from CDN so we don't have
-// to wire pdf.worker.mjs into angular.json assets.
-const PDFJS_VERSION = '4.0.379';
-const PDFJS_WORKER  = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.worker.min.mjs`;
-
+// (~1 MB) worker pulls in. The worker URL is built from the package's own
+// exported `version` so they can never drift apart (jsDelivr mirrors every
+// npm version, unlike cdnjs which can lag).
 let pdfjsPromise: Promise<any> | null = null;
 function getPdfjs(): Promise<any> {
   if (!pdfjsPromise) {
     pdfjsPromise = import('pdfjs-dist').then((pdfjs: any) => {
-      pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+      pdfjs.GlobalWorkerOptions.workerSrc =
+        `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
       return pdfjs;
     });
   }
