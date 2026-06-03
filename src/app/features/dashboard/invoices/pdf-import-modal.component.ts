@@ -286,8 +286,25 @@ export class PdfImportModalComponent {
           .eq('id', this.existingInvoiceId);
         if (error) throw new Error(error.message);
       } else {
-        const { error } = await this.supabase.client.from('gg_invoices').insert(payload);
+        const { data: inserted, error } = await this.supabase.client
+          .from('gg_invoices')
+          .insert(payload)
+          .select('id')
+          .single();
         if (error) throw new Error(error.message);
+        // Fire-and-forget push to dispatch workers. If FCM is misconfigured we
+        // don't want to fail the save — log and continue.
+        if (inserted?.id) {
+          const totalBoxes = items.reduce((s, it) => s + (it.quantity_boxes || 0), 0);
+          this.supabase.client.functions.invoke('notify-invoice-created', {
+            body: {
+              invoice_id:     inserted.id,
+              invoice_number: payload.invoice_number,
+              customer_name:  payload.customer_name,
+              total_boxes:    totalBoxes,
+            },
+          }).catch((e) => console.warn('notify-invoice-created failed:', e));
+        }
       }
       this.state.set('done');
     } catch (err) {
