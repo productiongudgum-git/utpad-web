@@ -101,8 +101,12 @@ export class PdfImportService {
     const customerGstin = gstins[1] ?? '';
 
     // 5. Line items — every item carries HSN 170410. Single-line after normalize.
-    //    Pattern: <seq> <description> 170410 <qty>(.pcs)? <rate> <gst%> <gstAmt> <amount>
-    const itemRe = /^\s*(\d+)\s+(.+?)\s+170410\s+(\d+(?:\.\d+)?)\s*(?:pcs)?\s+\d+(?:\.\d+)?\s+\d+%\s+[\d.,]+\s+[\d.,]+\s*$/gm;
+    //    Inter-state shape (single IGST column):
+    //      <seq> <description> 170410 <qty>(.pcs)? <rate> <gst%> <gstAmt> <amount>
+    //    Intra-state shape (CGST + SGST split — e.g. Karnataka→Karnataka):
+    //      <seq> <description> 170410 <qty>(.pcs)? <rate> <cgst%> <cgstAmt> <sgst%> <sgstAmt> <amount>
+    //    Both percentages may be decimals (e.g. 2.5% reduced gum-discount rate).
+    const itemRe = /^\s*(\d+)\s+(.+?)\s+170410\s+(\d+(?:\.\d+)?)\s*(?:pcs)?\s+\d+(?:\.\d+)?(?:\s+\d+(?:\.\d+)?%\s+[\d.,]+){1,2}\s+[\d.,]+\s*$/gm;
     const items: PdfInvoiceItem[] = [];
     let m: RegExpExecArray | null;
     while ((m = itemRe.exec(normalized)) !== null) {
