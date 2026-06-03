@@ -3,6 +3,7 @@ import { CommonModule, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { SupabaseService } from '../../../core/supabase.service';
+import { IngredientStockService } from '../../../core/services/ingredient-stock.service';
 import { KanbanComponent } from '../kanban/kanban.component';
 
 interface KpiData {
@@ -109,20 +110,20 @@ interface BatchDetail {
           <div class="beautiful-card kpi-clickable" style="padding:20px;position:relative;overflow:hidden;cursor:pointer;"
                (click)="goToLowStock()">
             <div style="position:absolute;top:16px;right:16px;width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;"
-                 [style.background]="kpi().lowStockCount > 0 ? '#fee2e2' : '#dcfce7'">
+                 [style.background]="stockSvc.lowStockCount() > 0 ? '#fee2e2' : '#dcfce7'">
               <span class="material-icons-round" style="font-size:22px;"
-                    [style.color]="kpi().lowStockCount > 0 ? 'var(--destructive)' : 'var(--primary)'">
-                {{ kpi().lowStockCount > 0 ? 'warning' : 'check_circle' }}
+                    [style.color]="stockSvc.lowStockCount() > 0 ? 'var(--destructive)' : 'var(--primary)'">
+                {{ stockSvc.lowStockCount() > 0 ? 'warning' : 'check_circle' }}
               </span>
             </div>
             <p style="font-size:12px;color:var(--muted-fg);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin:0 0 8px;">Low Stock Alerts</p>
-            <p class="font-display" style="font-size:36px;font-weight:700;color:var(--foreground);margin:0 0 6px;">{{ kpi().lowStockCount }}</p>
+            <p class="font-display" style="font-size:36px;font-weight:700;color:var(--foreground);margin:0 0 6px;">{{ stockSvc.lowStockCount() }}</p>
             <p style="font-size:12px;margin:0;display:flex;align-items:center;gap:4px;"
-               [style.color]="kpi().lowStockCount > 0 ? 'var(--destructive)' : 'var(--primary)'">
+               [style.color]="stockSvc.lowStockCount() > 0 ? 'var(--destructive)' : 'var(--primary)'">
               <span class="material-icons-round" style="font-size:14px;">
-                {{ kpi().lowStockCount > 0 ? 'open_in_new' : 'check' }}
+                {{ stockSvc.lowStockCount() > 0 ? 'open_in_new' : 'check' }}
               </span>
-              {{ kpi().lowStockCount > 0 ? 'Click to view' : 'All stocked' }}
+              {{ stockSvc.lowStockCount() > 0 ? 'Click to view' : 'All stocked' }}
             </p>
           </div>
         </div>
@@ -289,6 +290,10 @@ interface BatchDetail {
 })
 export class DashboardHomeComponent implements OnInit, OnDestroy {
   private readonly supabase = inject(SupabaseService);
+  // Low-stock count comes from the shared service so packing materials
+  // (GG/GG+ Ziplock, monocartons) and recipe ingredients all count via the
+  // same batches-left rule the Ingredients page uses.
+  readonly stockSvc = inject(IngredientStockService);
   private readonly router   = inject(Router);
 
   loading             = signal(true);
@@ -339,10 +344,7 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
       const today     = new Date().toISOString().substring(0, 10);
       const yesterday = new Date(Date.now() - 86400000).toISOString().substring(0, 10);
 
-      const [stockRes, todayProdRes, yesterdayProdRes, todayPackRes] = await Promise.all([
-        // Low stock ingredients
-        this.supabase.client.from('inventory_raw_materials')
-          .select('ingredient_id, current_qty, low_stock_threshold'),
+      const [todayProdRes, yesterdayProdRes, todayPackRes] = await Promise.all([
         // Today's production batches
         this.supabase.client.from('production_batches')
           .select('batch_code, planned_yield, actual_yield, flavor:gg_flavors!production_batches_flavor_id_fkey(name), recipe:gg_recipes(units_per_batch)')
@@ -363,9 +365,6 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
       const totalYieldKgToday = todayBatches.reduce((sum: number, b: any) => sum + (b.actual_yield ?? 0), 0);
       const yesterdayYieldKg  = yesterdayBatches.reduce((sum: number, b: any) => sum + (b.actual_yield ?? 0), 0);
       const packedBoxesToday  = (todayPackRes.data ?? []).reduce((s: number, r: any) => s + (r.boxes_packed ?? 0), 0);
-      const lowStock = (stockRes.data ?? []).filter(
-        (i: any) => (i.low_stock_threshold ?? 0) > 0 && (i.current_qty ?? 0) <= (i.low_stock_threshold ?? 0)
-      ).length;
 
       this.kpi.set({
         activeBatches:     todayBatches.length,
@@ -373,7 +372,8 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
         totalYieldKgToday,
         yesterdayYieldKg,
         packedBoxesToday,
-        lowStockCount: lowStock,
+        // Service computes from batches-left across raw + packing materials.
+        lowStockCount:     this.stockSvc.lowStockCount(),
       });
 
       // Packing warnings
