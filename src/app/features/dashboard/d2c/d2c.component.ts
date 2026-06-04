@@ -20,6 +20,37 @@ interface FifoLine {
 
 const SUGGESTED_CHANNELS = ['Amazon', 'Swiggy', 'Zepto', 'Blinkit', 'Shopify'];
 
+// D2C dispatch request types (populated from OPS API).
+interface D2CRequestItem {
+  id: string;
+  flavor_id: string;
+  boxes_requested: number;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  batch_breakdown: Array<{ production_batch_id: string; batch_code: string; batch_number: number | null; boxes: number }> | null;
+  approved_by?: string | null;
+  decided_at?: string | null;
+  allocation_id?: string | null;
+}
+
+interface D2CRequest {
+  id: string;
+  channel: string;
+  worker_id: string;
+  header_status: 'pending' | 'partially_approved' | 'approved' | 'rejected' | 'cancelled';
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  items: D2CRequestItem[];
+}
+
+interface FinishedGoodsRow {
+  flavor_id: string;
+  flavor_name: string;
+  boxes_available: number;
+}
+
+const OPS_API = 'https://utpad-ops-api-seven.vercel.app/api/v1/ops';
+
 @Component({
   selector: 'app-d2c',
   standalone: true,
@@ -482,36 +513,6 @@ const SUGGESTED_CHANNELS = ['Amazon', 'Swiggy', 'Zepto', 'Blinkit', 'Shopify'];
     }
   `,
 })
-interface D2CRequestItem {
-  id: string;
-  flavor_id: string;
-  boxes_requested: number;
-  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
-  batch_breakdown: Array<{ production_batch_id: string; batch_code: string; batch_number: number | null; boxes: number }> | null;
-  approved_by?: string | null;
-  decided_at?: string | null;
-  allocation_id?: string | null;
-}
-
-interface D2CRequest {
-  id: string;
-  channel: string;
-  worker_id: string;
-  header_status: 'pending' | 'partially_approved' | 'approved' | 'rejected' | 'cancelled';
-  notes: string | null;
-  created_at: string;
-  updated_at: string;
-  items: D2CRequestItem[];
-}
-
-interface FinishedGoodsRow {
-  flavor_id: string;
-  flavor_name: string;
-  boxes_available: number;
-}
-
-const OPS_API = 'https://utpad-ops-api-seven.vercel.app/api/v1/ops';
-
 export class D2CComponent implements OnInit {
   private readonly supabase = inject(SupabaseService);
 
