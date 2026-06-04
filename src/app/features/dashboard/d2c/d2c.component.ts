@@ -211,7 +211,7 @@ const OPS_API = 'https://utpad-ops-api-seven.vercel.app/api/v1/ops';
           </div>
         } @else {
           <div style="display:flex;gap:8px;margin-bottom:14px;">
-            @for (s of ['approved','rejected','partially_approved','cancelled']; track s) {
+            @for (s of historyFilterOptions; track s) {
               <button (click)="historyFilter.set(s)"
                       style="padding:7px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #E5E7EB;"
                       [style.background]="historyFilter() === s ? '#01AC51' : '#fff'"
@@ -534,7 +534,8 @@ export class D2CComponent implements OnInit {
   historyLoading        = signal(false);
   pendingRequests       = signal<D2CRequest[]>([]);
   historyRequests       = signal<D2CRequest[]>([]);
-  historyFilter         = signal<'approved' | 'rejected' | 'partially_approved' | 'cancelled'>('approved');
+  historyFilter         = signal<string>('approved');
+  readonly historyFilterOptions: ReadonlyArray<string> = ['approved', 'rejected', 'partially_approved', 'cancelled'];
   finishedGoods         = signal<FinishedGoodsRow[]>([]);
   selectedItemIds       = signal<Set<string>>(new Set());
   decidingRequestId     = signal<string | null>(null);
