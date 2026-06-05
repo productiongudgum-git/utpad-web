@@ -172,6 +172,8 @@ interface FlavorGroup {
                           <thead>
                             <tr style="border-bottom:1px solid #E5E7EB;">
                               <th style="text-align:left;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Batch Code</th>
+                              <th style="text-align:right;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Packed</th>
+                              <th style="text-align:right;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Dispatched</th>
                               <th style="text-align:right;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Net Stock</th>
                               <th style="text-align:right;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Reserved</th>
                               <th style="text-align:right;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Available</th>
@@ -181,6 +183,12 @@ interface FlavorGroup {
                             @for (b of relevantBatches(fg.batches); track b.batchCode) {
                               <tr style="border-bottom:1px solid #f3f4f6;">
                                 <td style="padding:8px 12px;font-size:12px;font-weight:600;color:#374151;font-family:monospace;">{{ b.batchCode }}</td>
+                                <td style="padding:8px 12px;text-align:right;font-size:12px;color:#374151;">
+                                  {{ b.boxesPacked | number:'1.0-0' }}
+                                </td>
+                                <td style="padding:8px 12px;text-align:right;font-size:12px;color:#dc2626;">
+                                  {{ (b.boxesPacked - b.netStock) | number:'1.0-0' }}
+                                </td>
                                 <td style="padding:8px 12px;text-align:right;font-size:12px;color:#374151;">
                                   {{ b.netStock | number:'1.0-0' }}
                                 </td>
