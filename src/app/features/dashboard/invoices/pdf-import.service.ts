@@ -66,6 +66,31 @@ export class PdfImportService {
   }
 
   /**
+   * Parse a Zoho PDF that contains *one or more* invoices concatenated.
+   * Splits on the `# : INV...` marker and parses each section independently.
+   * Returns at least one invoice; throws if no invoice marker is found.
+   */
+  parseZohoInvoices(text: string): PdfInvoice[] {
+    // Split on the lookahead so the marker stays at the start of each chunk.
+    const sections = text.split(/(?=#\s*:\s*INV[\w\-\/]+)/);
+    const invoices: PdfInvoice[] = [];
+    for (const section of sections) {
+      // Skip any leading section that doesn't contain an invoice marker (e.g. the bare header).
+      if (!/#\s*:\s*INV[\w\-\/]+/.test(section)) continue;
+      try {
+        invoices.push(this.parseZohoInvoice(section));
+      } catch {
+        // Per-invoice parse failure — keep going so a malformed slice doesn't kill the rest.
+        // (Caller surfaces the missing one by comparing markers found vs. invoices parsed.)
+      }
+    }
+    if (invoices.length === 0) {
+      throw new Error('No invoices found — the PDF layout may differ from the expected Zoho template.');
+    }
+    return invoices;
+  }
+
+  /**
    * Parse a Zoho-formatted invoice PDF (text version) into structured fields.
    * Throws if the template doesn't look like a Zoho gum invoice.
    */
