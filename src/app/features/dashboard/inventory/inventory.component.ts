@@ -152,7 +152,7 @@ interface FlavorGroup {
                   <tr>
                     <td colspan="3" style="padding:0;background:#f8f9fa;border-bottom:1px solid #E5E7EB;">
                       <div style="padding:0 16px 12px 60px;">
-                        <!-- 1-line stat strip — the columns we removed from the top row. -->
+                        <!-- 1-line stat strip — full set of figures the top row hides. -->
                         <p style="font-size:13px;color:#6B7280;margin:10px 0 0;">
                           <span style="color:#374151;font-weight:600;">Packed</span> {{ fg.totalPacked | number:'1.0-0' }}
                           <span style="color:#9CA3AF;"> · </span>
@@ -161,6 +161,11 @@ interface FlavorGroup {
                           <span style="color:#374151;font-weight:600;">Net Stock</span> {{ fg.netStock | number:'1.0-0' }}
                           <span style="color:#9CA3AF;"> · </span>
                           <span style="color:#374151;font-weight:600;">Reserved</span> <span style="color:#b45309;">{{ fg.totalReserved | number:'1.0-0' }}</span>
+                          <span style="color:#9CA3AF;"> · </span>
+                          <span style="color:#374151;font-weight:600;">Available</span>
+                          <span [style.color]="isOut(fg) ? '#dc2626' : isLow(fg) ? '#ea580c' : '#01AC51'" style="font-weight:700;">
+                            {{ fg.available | number:'1.0-0' }}
+                          </span>
                         </p>
                         <p style="font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.5px;margin:10px 0 6px;">Batches</p>
                         <table style="width:100%;border-collapse:collapse;margin-top:4px;">
