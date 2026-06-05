@@ -44,12 +44,18 @@ interface FlavorGroup {
       <div style="margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
         <div>
           <h1 style="font-family:'Cabin',sans-serif;font-size:22px;font-weight:700;color:#121212;margin:0 0 4px;">Inventory</h1>
-          <p style="color:#6B7280;font-size:14px;margin:0;">Net box stock by flavor. <strong>Net Stock</strong> = packed − dispatched (date-filtered). <strong>Reserved</strong> = boxes committed to packed-but-not-shipped invoices (current). <strong>Available</strong> = Net Stock − Reserved.</p>
+          <p style="color:#6B7280;font-size:14px;margin:0;">Net box stock by flavor — only <strong>Available</strong> is shown at a glance. Expand a row for Packed, Dispatched, Net Stock and Reserved.</p>
         </div>
-        <button (click)="loadData()" style="padding:8px 16px;background:#f3f4f6;border:1px solid #E5E7EB;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:6px;color:#374151;">
-          <span class="material-icons-round" style="font-size:16px;">refresh</span>
-          Refresh
-        </button>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#374151;cursor:pointer;background:#f3f4f6;border:1px solid #E5E7EB;border-radius:8px;padding:7px 12px;">
+            <input type="checkbox" [checked]="showOnlyLow()" (change)="toggleShowOnlyLow()">
+            Show only low (≤ {{ LOW_THRESHOLD }})
+          </label>
+          <button (click)="loadData()" style="padding:8px 16px;background:#f3f4f6;border:1px solid #E5E7EB;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:6px;color:#374151;">
+            <span class="material-icons-round" style="font-size:16px;">refresh</span>
+            Refresh
+          </button>
+        </div>
       </div>
 
       <!-- Date range filter -->
@@ -79,6 +85,14 @@ interface FlavorGroup {
           <span class="material-icons-round" style="font-size:48px;display:block;margin-bottom:12px;">inventory_2</span>
           <p style="font-size:15px;margin:0;">No packing session data found.</p>
         </div>
+      } @else if (filteredFlavors().length === 0 && showOnlyLow()) {
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+          <div style="display:flex;align-items:center;gap:10px;color:#15803d;">
+            <span class="material-icons-round" style="font-size:22px;">check_circle</span>
+            <span style="font-size:14px;font-weight:600;">All flavours above {{ LOW_THRESHOLD }}.</span>
+          </div>
+          <button (click)="toggleShowOnlyLow()" style="background:none;border:none;color:#15803d;font-size:13px;font-weight:600;cursor:pointer;text-decoration:underline;">Show all</button>
+        </div>
       } @else {
         <div style="background:#fff;border-radius:12px;border:1px solid #E5E7EB;overflow:hidden;">
           <table style="width:100%;border-collapse:collapse;">
@@ -86,18 +100,23 @@ interface FlavorGroup {
               <tr style="background:#f8f9fa;border-bottom:1px solid #E5E7EB;">
                 <th style="text-align:left;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;width:40px;"></th>
                 <th style="text-align:left;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Flavor Name</th>
-                <th style="text-align:right;padding:12px 12px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Packed</th>
-                <th style="text-align:right;padding:12px 12px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Dispatched</th>
-                <th style="text-align:right;padding:12px 12px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Net Stock</th>
-                <th style="text-align:right;padding:12px 12px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Reserved</th>
-                <th style="text-align:right;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Available</th>
+                <th (click)="cycleSort()"
+                    style="text-align:right;padding:12px 16px;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;cursor:pointer;user-select:none;">
+                  <span style="display:inline-flex;align-items:center;gap:4px;">
+                    Available
+                    <span class="material-icons-round" style="font-size:14px;"
+                          [style.color]="sortDir() ? '#01AC51' : '#9CA3AF'">
+                      {{ sortDir() === 'asc' ? 'arrow_upward' : sortDir() === 'desc' ? 'arrow_downward' : 'unfold_more' }}
+                    </span>
+                  </span>
+                </th>
               </tr>
             </thead>
             <tbody>
-              @for (fg of flavors(); track fg.flavorId) {
+              @for (fg of filteredFlavors(); track fg.flavorId) {
                 <!-- Flavor row -->
                 <tr style="border-bottom:1px solid #f3f4f6;cursor:pointer;transition:background 0.1s;"
-                    [style.background]="expandedFlavorId() === fg.flavorId ? '#f0fdf4' : '#fff'"
+                    [style.background]="rowBackground(fg)"
                     (click)="toggleExpand(fg.flavorId)">
                   <td style="padding:12px 16px;text-align:center;">
                     <span class="material-icons-round" style="font-size:16px;color:#6B7280;transition:transform 0.2s;"
@@ -113,22 +132,17 @@ interface FlavorGroup {
                       <span style="font-size:14px;font-weight:600;color:#121212;">{{ fg.flavorName }}</span>
                     </div>
                   </td>
-                  <td style="padding:12px 12px;text-align:right;">
-                    <span style="font-size:14px;color:#374151;">{{ fg.totalPacked | number:'1.0-0' }}</span>
-                  </td>
-                  <td style="padding:12px 12px;text-align:right;">
-                    <span style="font-size:14px;color:#dc2626;">{{ fg.totalDispatched | number:'1.0-0' }}</span>
-                  </td>
-                  <td style="padding:12px 12px;text-align:right;">
-                    <span style="font-size:14px;color:#374151;">{{ fg.netStock | number:'1.0-0' }}</span>
-                  </td>
-                  <td style="padding:12px 12px;text-align:right;">
-                    <span style="font-size:14px;color:#b45309;">{{ fg.totalReserved | number:'1.0-0' }}</span>
-                  </td>
                   <td style="padding:12px 16px;text-align:right;">
-                    <span style="font-size:14px;font-weight:700;"
-                          [style.color]="fg.available > 0 ? '#01AC51' : fg.available < 0 ? '#dc2626' : '#6B7280'">
-                      {{ fg.available | number:'1.0-0' }}
+                    <span style="display:inline-flex;align-items:center;gap:6px;justify-content:flex-end;">
+                      @if (isOut(fg)) {
+                        <span class="material-icons-round" style="font-size:16px;color:#dc2626;" title="Out of stock">dangerous</span>
+                      } @else if (isLow(fg)) {
+                        <span class="material-icons-round" style="font-size:16px;color:#ea580c;" title="Low stock">warning_amber</span>
+                      }
+                      <span style="font-size:14px;font-weight:700;"
+                            [style.color]="isOut(fg) ? '#dc2626' : isLow(fg) ? '#ea580c' : '#01AC51'">
+                        {{ fg.available | number:'1.0-0' }}
+                      </span>
                     </span>
                   </td>
                 </tr>
@@ -136,8 +150,18 @@ interface FlavorGroup {
                 <!-- Expanded session detail rows -->
                 @if (expandedFlavorId() === fg.flavorId) {
                   <tr>
-                    <td colspan="7" style="padding:0;background:#f8f9fa;border-bottom:1px solid #E5E7EB;">
+                    <td colspan="3" style="padding:0;background:#f8f9fa;border-bottom:1px solid #E5E7EB;">
                       <div style="padding:0 16px 12px 60px;">
+                        <!-- 1-line stat strip — the columns we removed from the top row. -->
+                        <p style="font-size:13px;color:#6B7280;margin:10px 0 0;">
+                          <span style="color:#374151;font-weight:600;">Packed</span> {{ fg.totalPacked | number:'1.0-0' }}
+                          <span style="color:#9CA3AF;"> · </span>
+                          <span style="color:#374151;font-weight:600;">Dispatched</span> <span style="color:#dc2626;">{{ fg.totalDispatched | number:'1.0-0' }}</span>
+                          <span style="color:#9CA3AF;"> · </span>
+                          <span style="color:#374151;font-weight:600;">Net Stock</span> {{ fg.netStock | number:'1.0-0' }}
+                          <span style="color:#9CA3AF;"> · </span>
+                          <span style="color:#374151;font-weight:600;">Reserved</span> <span style="color:#b45309;">{{ fg.totalReserved | number:'1.0-0' }}</span>
+                        </p>
                         <p style="font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.5px;margin:10px 0 6px;">Batches</p>
                         <table style="width:100%;border-collapse:collapse;margin-top:4px;">
                           <thead>
@@ -215,13 +239,13 @@ interface FlavorGroup {
         <div style="margin-top:16px;display:flex;align-items:center;gap:16px;font-size:13px;color:#6B7280;flex-wrap:wrap;">
           <span style="display:flex;align-items:center;gap:6px;">
             <span class="material-icons-round" style="font-size:15px;">info_outline</span>
-            {{ flavors().length }} flavor{{ flavors().length === 1 ? '' : 's' }}
+            {{ flavors().length }} flavour{{ flavors().length === 1 ? '' : 's' }}
+            @if (lowCount() > 0) {
+              <span style="color:#ea580c;font-weight:600;">· {{ lowCount() }} low</span>
+            }
           </span>
-          <span>Packed: <strong style="color:#374151;">{{ grandTotalPacked() | number:'1.0-0' }}</strong></span>
-          <span>Dispatched: <strong style="color:#dc2626;">{{ grandTotalDispatched() | number:'1.0-0' }}</strong></span>
-          <span>Net stock: <strong style="color:#374151;">{{ grandNetStock() | number:'1.0-0' }}</strong></span>
-          <span>Reserved: <strong style="color:#b45309;">{{ grandTotalReserved() | number:'1.0-0' }}</strong></span>
-          <span>Available: <strong style="color:#01AC51;">{{ grandAvailable() | number:'1.0-0' }}</strong></span>
+          <span>Available total: <strong style="color:#01AC51;">{{ grandAvailable() | number:'1.0-0' }}</strong></span>
+          <span style="color:#9CA3AF;">Expand a row for Packed / Dispatched / Net / Reserved.</span>
         </div>
       }
     </div>
@@ -232,9 +256,49 @@ export class InventoryComponent implements OnInit, OnDestroy {
   private channel: RealtimeChannel | null = null;
   private reloadDebounce: ReturnType<typeof setTimeout> | null = null;
 
+  // Below this many "available" boxes a flavour is flagged low (inclusive of 100).
+  readonly LOW_THRESHOLD = 100;
+
   loading = signal(true);
   flavors = signal<FlavorGroup[]>([]);
   expandedFlavorId = signal<string | null>(null);
+
+  /** Toggle that filters the table to flavours with Available ≤ LOW_THRESHOLD. */
+  showOnlyLow = signal(false);
+  toggleShowOnlyLow(): void { this.showOnlyLow.update(v => !v); }
+
+  /** Available-column sort state. null = default (alphabetical by name from the load). */
+  sortDir = signal<'asc' | 'desc' | null>(null);
+  cycleSort(): void {
+    this.sortDir.update(d => d === null ? 'asc' : d === 'asc' ? 'desc' : null);
+  }
+
+  /** Single source of truth for the rendered list — applies filter + sort. */
+  readonly filteredFlavors = computed(() => {
+    let list = this.flavors();
+    if (this.showOnlyLow()) list = list.filter(f => f.available <= this.LOW_THRESHOLD);
+    const dir = this.sortDir();
+    if (dir) {
+      const mul = dir === 'asc' ? 1 : -1;
+      list = [...list].sort((a, b) => (a.available - b.available) * mul);
+    }
+    return list;
+  });
+
+  readonly lowCount = computed(() =>
+    this.flavors().filter(f => f.available <= this.LOW_THRESHOLD).length,
+  );
+
+  // ── Low-stock helpers ────────────────────────────────────────────────────
+  isLow(fg: FlavorGroup): boolean { return fg.available > 0 && fg.available <= this.LOW_THRESHOLD; }
+  isOut(fg: FlavorGroup): boolean { return fg.available <= 0; }
+
+  rowBackground(fg: FlavorGroup): string {
+    if (this.expandedFlavorId() === fg.flavorId) return '#f0fdf4';
+    if (this.isOut(fg)) return '#fef2f2';
+    if (this.isLow(fg)) return '#fffbeb';
+    return '#fff';
+  }
 
   fromDate = signal(fmtDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
   toDate = signal(fmtDate(new Date()));
