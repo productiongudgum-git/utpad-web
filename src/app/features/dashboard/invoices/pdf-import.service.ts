@@ -69,22 +69,26 @@ export class PdfImportService {
 
   /**
    * Parse a Zoho PDF that contains one or more invoices and/or delivery challans
-   * concatenated. Splits on either marker and dispatches each section to the
-   * right per-format parser. Skips sections that fail individually so a single
-   * malformed slice doesn't kill the whole batch.
+   * concatenated. Splits on the document TITLE (`TAX INVOICE` / `DELIVERY CHALLAN`)
+   * since those are the most reliably-extracted text from pdfjs — number/date
+   * labels often get mangled by line breaks and whitespace shuffling.
    */
   parseZohoInvoices(text: string): PdfInvoice[] {
-    // Split on the lookahead so the marker stays at the start of each chunk.
-    // INV…  → Zoho TAX INVOICE.
-    // DC-…  → DELIVERY CHALLAN (header reads "Delivery Challan# : DC-…").
-    const sections = text.split(/(?=(?:Delivery Challan)?#\s*:\s*(?:INV|DC)[\w\-\/]+)/i);
+    // Split on the lookahead so the title stays at the start of each chunk.
+    const sections = text.split(/(?=DELIVERY\s+CHALLAN|TAX\s+INVOICE)/i);
     const invoices: PdfInvoice[] = [];
     for (const section of sections) {
-      const hasInvoice = /(?:^|\n|\s)#\s*:\s*INV[\w\-\/]+/.test(section);
-      const hasChallan = /Delivery Challan#\s*:\s*DC[\w\-]+/i.test(section);
-      if (!hasInvoice && !hasChallan) continue;
+      const hasChallan = /DELIVERY\s+CHALLAN/i.test(section);
+      const hasInvoice = /TAX\s+INVOICE/i.test(section) && !hasChallan;
+      // Single-document PDFs where the title didn't extract cleanly: fall back
+      // to scanning for the number markers themselves.
+      const fallbackChallan = !hasChallan && /Delivery\s*Challan\s*#?\s*:?\s*DC[\w\-]+/i.test(section);
+      const fallbackInvoice = !hasInvoice && !hasChallan && /#\s*:\s*INV[\w\-\/]+/.test(section);
+      const isChallan = hasChallan || fallbackChallan;
+      const isInvoice = hasInvoice || fallbackInvoice;
+      if (!isChallan && !isInvoice) continue;
       try {
-        invoices.push(hasChallan ? this.parseDeliveryChallan(section) : this.parseZohoInvoice(section));
+        invoices.push(isChallan ? this.parseDeliveryChallan(section) : this.parseZohoInvoice(section));
       } catch {
         // Per-document parse failure — keep going so a malformed slice doesn't kill the rest.
       }
@@ -187,14 +191,34 @@ export class PdfImportService {
       }, [])
       .join('\n');
 
-    const dcMatch   = normalized.match(/Delivery Challan#\s*:\s*(DC[\w\-]+)/i);
-    const dateMatch = normalized.match(/Challan Date\s*:\s*(\d{2}\/\d{2}\/\d{4})/i);
-    if (!dcMatch)   throw new Error('Delivery Challan number not found.');
+    // Number: first DC-… pattern anywhere in the section. Robust against any
+    // label/whitespace shuffling pdfjs might introduce.
+    const dcMatch = normalized.match(/(DC[-\s]?\d{3,})/i);
+    if (!dcMatch) throw new Error('Delivery Challan number not found.');
+
+    // Date: prefer the labeled date; fall back to the first DD/MM/YYYY pattern.
+    const dateLabelMatch = normalized.match(/Challan\s*Date\s*:?\s*(\d{2}\/\d{2}\/\d{4})/i);
+    const dateAnyMatch   = normalized.match(/(\d{2}\/\d{2}\/\d{4})/);
+    const dateMatch      = dateLabelMatch ?? dateAnyMatch;
     if (!dateMatch) throw new Error('Challan Date not found.');
 
-    // Customer is the first non-empty line after "Deliver To".
-    const delivMatch = normalized.match(/Deliver To\s*\n([^\n]+)/i);
-    const customerName = delivMatch ? delivMatch[1].trim() : '';
+    // Customer: the first non-empty line after "Deliver To" (case-insensitive,
+    // tolerant of line-break placement). Walk forward over normalized lines.
+    let customerName = '';
+    const lines = normalized.split('\n').map((l) => l.trim());
+    const deliverIdx = lines.findIndex((l) => /Deliver\s*To/i.test(l));
+    if (deliverIdx >= 0) {
+      // First non-empty line after the label that isn't the label itself.
+      for (let i = deliverIdx + 1; i < lines.length; i++) {
+        const candidate = lines[i].replace(/^Deliver\s*To\s*:?\s*/i, '').trim();
+        if (candidate) { customerName = candidate; break; }
+      }
+      // If the label was inline (e.g. "Deliver To Acme Foods LLP"), use the trailing text.
+      if (!customerName) {
+        const inline = lines[deliverIdx].replace(/^.*Deliver\s*To\s*:?\s*/i, '').trim();
+        if (inline) customerName = inline;
+      }
+    }
 
     // Line items — challans use 8-digit HSN and a simpler shape:
     //   <seq> <description> 17041000 <qty>(.pcs)? <rate> <amount>
@@ -215,7 +239,8 @@ export class PdfImportService {
 
     return {
       documentType: 'challan',
-      invoiceNumber: dcMatch[1].trim(),
+      // Normalize "DC 00257" / "DC-00257" / "DC00257" → "DC-00257"
+      invoiceNumber: dcMatch[1].trim().replace(/^DC[\s\-]?/i, 'DC-'),
       invoiceDate:   toIsoDate(dateMatch[1]),
       customerName,
       customerGstin: '',  // Challans typically only show our GSTIN, not the recipient's.
