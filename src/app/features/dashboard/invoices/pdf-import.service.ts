@@ -25,15 +25,17 @@ export interface PdfInvoiceItem {
 }
 
 export interface PdfInvoice {
-  /** e.g. "INV26-27/148" */
+  /** e.g. "INV26-27/148" for invoices, "DC-00257" for delivery challans. */
   invoiceNumber: string;
   /** ISO YYYY-MM-DD from the DD/MM/YYYY in the PDF. */
   invoiceDate: string;
-  /** First line after "Place Of Supply : …", e.g. "Confetti Exports Private Limited". */
+  /** Customer name from "Place Of Supply" (invoice) or "Deliver To" (challan). */
   customerName: string;
-  /** Customer GSTIN (the second GSTIN on the page, ours is excluded). */
+  /** Customer GSTIN (present on invoices; empty on challans). */
   customerGstin: string;
   items: PdfInvoiceItem[];
+  /** Distinguishes the two PDF shapes the importer can read. */
+  documentType: 'invoice' | 'challan';
 }
 
 @Injectable({ providedIn: 'root' })
@@ -66,26 +68,29 @@ export class PdfImportService {
   }
 
   /**
-   * Parse a Zoho PDF that contains *one or more* invoices concatenated.
-   * Splits on the `# : INV...` marker and parses each section independently.
-   * Returns at least one invoice; throws if no invoice marker is found.
+   * Parse a Zoho PDF that contains one or more invoices and/or delivery challans
+   * concatenated. Splits on either marker and dispatches each section to the
+   * right per-format parser. Skips sections that fail individually so a single
+   * malformed slice doesn't kill the whole batch.
    */
   parseZohoInvoices(text: string): PdfInvoice[] {
     // Split on the lookahead so the marker stays at the start of each chunk.
-    const sections = text.split(/(?=#\s*:\s*INV[\w\-\/]+)/);
+    // INV…  → Zoho TAX INVOICE.
+    // DC-…  → DELIVERY CHALLAN (header reads "Delivery Challan# : DC-…").
+    const sections = text.split(/(?=(?:Delivery Challan)?#\s*:\s*(?:INV|DC)[\w\-\/]+)/i);
     const invoices: PdfInvoice[] = [];
     for (const section of sections) {
-      // Skip any leading section that doesn't contain an invoice marker (e.g. the bare header).
-      if (!/#\s*:\s*INV[\w\-\/]+/.test(section)) continue;
+      const hasInvoice = /(?:^|\n|\s)#\s*:\s*INV[\w\-\/]+/.test(section);
+      const hasChallan = /Delivery Challan#\s*:\s*DC[\w\-]+/i.test(section);
+      if (!hasInvoice && !hasChallan) continue;
       try {
-        invoices.push(this.parseZohoInvoice(section));
+        invoices.push(hasChallan ? this.parseDeliveryChallan(section) : this.parseZohoInvoice(section));
       } catch {
-        // Per-invoice parse failure — keep going so a malformed slice doesn't kill the rest.
-        // (Caller surfaces the missing one by comparing markers found vs. invoices parsed.)
+        // Per-document parse failure — keep going so a malformed slice doesn't kill the rest.
       }
     }
     if (invoices.length === 0) {
-      throw new Error('No invoices found — the PDF layout may differ from the expected Zoho template.');
+      throw new Error('No invoices or delivery challans found — PDF layout unrecognized.');
     }
     return invoices;
   }
@@ -147,6 +152,7 @@ export class PdfImportService {
     }
 
     return {
+      documentType: 'invoice',
       invoiceNumber: invMatch[1].trim(),
       invoiceDate:   toIsoDate(dateMatch[1]),
       customerName,
@@ -154,14 +160,89 @@ export class PdfImportService {
       items,
     };
   }
+
+  /**
+   * Parse a Zoho-formatted Delivery Challan PDF section into the same shape as
+   * an invoice. Differences vs. tax invoice:
+   *   - Number prefix is `Delivery Challan# : DC-…`
+   *   - Date label is `Challan Date : DD/MM/YYYY`
+   *   - Customer line follows `Deliver To` (not `Place Of Supply`)
+   *   - HSN code is the 8-digit `17041000` (vs 6-digit `170410` on invoices)
+   *   - No per-line tax columns — only rate + amount
+   *   - Item descriptions use multi-dash format ("Gud Gum - Caffeine - Cola - 20g")
+   */
+  parseDeliveryChallan(text: string): PdfInvoice {
+    // Same normalize step as invoice: collapse "pcs" continuation lines.
+    const normalized = text
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .reduce<string[]>((acc, line) => {
+        if (line.toLowerCase() === 'pcs' && acc.length > 0) {
+          acc[acc.length - 1] = acc[acc.length - 1] + ' pcs';
+        } else {
+          acc.push(line);
+        }
+        return acc;
+      }, [])
+      .join('\n');
+
+    const dcMatch   = normalized.match(/Delivery Challan#\s*:\s*(DC[\w\-]+)/i);
+    const dateMatch = normalized.match(/Challan Date\s*:\s*(\d{2}\/\d{2}\/\d{4})/i);
+    if (!dcMatch)   throw new Error('Delivery Challan number not found.');
+    if (!dateMatch) throw new Error('Challan Date not found.');
+
+    // Customer is the first non-empty line after "Deliver To".
+    const delivMatch = normalized.match(/Deliver To\s*\n([^\n]+)/i);
+    const customerName = delivMatch ? delivMatch[1].trim() : '';
+
+    // Line items — challans use 8-digit HSN and a simpler shape:
+    //   <seq> <description> 17041000 <qty>(.pcs)? <rate> <amount>
+    const itemRe = /^\s*(\d+)\s+(.+?)\s+17041000\s+(\d+(?:\.\d+)?)\s*(?:pcs)?\s+\d+(?:\.\d+)?\s+[\d.,]+\s*$/gm;
+    const items: PdfInvoiceItem[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = itemRe.exec(normalized)) !== null) {
+      const description = m[2].trim();
+      items.push({
+        description,
+        cleanedName: cleanFlavorName(description),
+        quantityBoxes: Math.round(Number(m[3])),
+      });
+    }
+    if (items.length === 0) {
+      throw new Error('No line items found in delivery challan — layout may differ from the expected template.');
+    }
+
+    return {
+      documentType: 'challan',
+      invoiceNumber: dcMatch[1].trim(),
+      invoiceDate:   toIsoDate(dateMatch[1]),
+      customerName,
+      customerGstin: '',  // Challans typically only show our GSTIN, not the recipient's.
+      items,
+    };
+  }
 }
 
-/** Strip "Gud Gum-" prefix and any trailing "<n>g" size so name-matching has a chance. */
+/**
+ * Strip "Gud Gum" prefix, trailing "<n>g" size, and any leading category prefix
+ * (e.g. "Caffeine -" on delivery challans where the product line precedes the
+ * actual flavour). Multi-dash formats like "Gud Gum - Caffeine - Cola - 20g"
+ * collapse to the trailing flavour token ("Cola"), which the fuzzy matcher then
+ * resolves to the actual flavour ("Cola Charge").
+ */
 function cleanFlavorName(description: string): string {
-  return description
-    .replace(/^\s*Gud\s*Gum\s*-?\s*/i, '')
-    .replace(/\s+\d+\s*g\s*$/i, '')
-    .trim();
+  // 1. Strip "Gud Gum" prefix (with optional trailing dash and whitespace).
+  let s = description.replace(/^\s*Gud\s*Gum\s*[-–]?\s*/i, '').trim();
+  // 2. Strip trailing size suffix like "20g", "21 g", "10 ml".
+  s = s.replace(/\s+\d+\s*(g|ml|kg|l)\s*$/i, '').trim();
+  // 3. If the remaining string is dash-separated (challan format),
+  //    take the last non-empty part — typically the actual flavour name.
+  if (s.includes(' - ') || s.includes(' – ')) {
+    const parts = s.split(/\s*[-–]\s*/).map((p) => p.trim()).filter(Boolean);
+    if (parts.length > 0) s = parts[parts.length - 1];
+  }
+  return s.trim();
 }
 
 /** "01/06/2026" → "2026-06-01" */

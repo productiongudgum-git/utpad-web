@@ -39,8 +39,8 @@ interface InvoiceForm {
         <!-- Header -->
         <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid #E5E7EB;">
           <div>
-            <h2 style="font-size:16px;font-weight:700;color:#121212;margin:0 0 2px;">Import invoice from PDF</h2>
-            <p style="font-size:12px;color:#6B7280;margin:0;">Upload a Zoho-generated invoice PDF — one or more invoices per file.</p>
+            <h2 style="font-size:16px;font-weight:700;color:#121212;margin:0 0 2px;">Import invoice or delivery challan from PDF</h2>
+            <p style="font-size:12px;color:#6B7280;margin:0;">Upload a Zoho-generated PDF — invoices and/or delivery challans, one or many per file. Auto-detected.</p>
           </div>
           <button (click)="onCancel()" [disabled]="state() === 'committing'"
                   style="border:none;background:none;cursor:pointer;color:#9CA3AF;display:flex;">
@@ -56,7 +56,7 @@ interface InvoiceForm {
               <input type="file" accept="application/pdf,.pdf" (change)="onFile($event)" style="display:none;">
               <span class="material-icons-round" style="font-size:34px;color:#9CA3AF;display:block;margin-bottom:8px;">picture_as_pdf</span>
               <p style="font-size:14px;font-weight:600;color:#374151;margin:0 0 4px;">Choose a PDF file</p>
-              <p style="font-size:12px;color:#9CA3AF;margin:0;">Zoho invoice format — single or multi-invoice PDFs supported</p>
+              <p style="font-size:12px;color:#9CA3AF;margin:0;">Zoho invoice or delivery challan — single or multi-document PDFs supported</p>
             </label>
           }
 
@@ -103,6 +103,11 @@ interface InvoiceForm {
                            [checked]="form.include"
                            (change)="toggleInclude(idx)"
                            [disabled]="state() === 'committing'" />
+                    <span style="font-size:10px;font-weight:700;text-transform:uppercase;padding:2px 7px;border-radius:5px;letter-spacing:0.4px;"
+                          [style.background]="form.invoice.documentType === 'challan' ? '#fef3c7' : '#dbeafe'"
+                          [style.color]="form.invoice.documentType === 'challan' ? '#92400e' : '#1e40af'">
+                      {{ form.invoice.documentType === 'challan' ? 'Challan' : 'Invoice' }}
+                    </span>
                     <span style="font-family:monospace;">{{ form.invoice.invoiceNumber }}</span>
                     <span style="color:#6B7280;font-weight:500;">· {{ form.invoice.invoiceDate }}</span>
                     <span style="color:#6B7280;font-weight:500;">· {{ form.items.length }} items, {{ boxesFor(form) }} boxes</span>
@@ -362,6 +367,7 @@ export class PdfImportModalComponent {
           expected_dispatch_date: null,
           is_packed: false,
           is_dispatched: false,
+          document_type: form.invoice.documentType,   // 'invoice' or 'challan'
         };
 
         if (form.existingInvoiceId) {
