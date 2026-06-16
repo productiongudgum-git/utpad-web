@@ -220,9 +220,12 @@ export class PdfImportService {
       }
     }
 
-    // Line items — challans use 8-digit HSN and a simpler shape:
-    //   <seq> <description> 17041000 <qty>(.pcs)? <rate> <amount>
-    const itemRe = /^\s*(\d+)\s+(.+?)\s+17041000\s+(\d+(?:\.\d+)?)\s*(?:pcs)?\s+\d+(?:\.\d+)?\s+[\d.,]+\s*$/gm;
+    // Line items — challans sometimes mix 8-digit (17041000) and 6-digit (170410)
+    // HSN codes in the same document. The description may also wrap onto a second
+    // line for clarifying notes (e.g. "Cola Charge & Cola Caffeine are the same.")
+    // so we use [\s\S]+? (any char including newline) instead of .+?.
+    //   <seq> <description, maybe multi-line> 170410(00)? <qty>(.pcs)? <rate> <amount>
+    const itemRe = /^\s*(\d+)\s+([\s\S]+?)\s+170410(?:00)?\s+(\d+(?:\.\d+)?)\s*(?:pcs)?\s+\d+(?:\.\d+)?\s+[\d.,]+\s*$/gm;
     const items: PdfInvoiceItem[] = [];
     let m: RegExpExecArray | null;
     while ((m = itemRe.exec(normalized)) !== null) {
@@ -257,8 +260,12 @@ export class PdfImportService {
  * resolves to the actual flavour ("Cola Charge").
  */
 function cleanFlavorName(description: string): string {
+  // 0. Some challan rows include a clarifying note on a second line, e.g.
+  //    "Gud Gum - Caffeine - Cola - 20g\nCola Charge & Cola Caffeine are the same."
+  //    We only want the first line for name extraction.
+  let s = description.split('\n')[0].trim();
   // 1. Strip "Gud Gum" prefix (with optional trailing dash and whitespace).
-  let s = description.replace(/^\s*Gud\s*Gum\s*[-–]?\s*/i, '').trim();
+  s = s.replace(/^\s*Gud\s*Gum\s*[-–]?\s*/i, '').trim();
   // 2. Strip trailing size suffix like "20g", "21 g", "10 ml".
   s = s.replace(/\s+\d+\s*(g|ml|kg|l)\s*$/i, '').trim();
   // 3. If the remaining string is dash-separated (challan format),
