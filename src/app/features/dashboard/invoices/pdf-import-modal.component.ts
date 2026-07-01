@@ -11,6 +11,7 @@ interface ItemRow {
   cleanedName: string;
   quantityBoxes: number;
   flavorId: string;        // '' when unmapped
+  mappingSource: 'remembered' | 'auto-match' | 'unmapped';
 }
 
 /** Per-invoice editable state in the preview. One per parsed invoice section. */
@@ -145,7 +146,14 @@ interface InvoiceForm {
                            [style.background]="row.flavorId ? 'transparent' : '#fff5f5'">
                         <div>
                           <p style="font-size:13px;color:#374151;margin:0;">{{ row.description }}</p>
-                          <p style="font-size:11px;color:#9CA3AF;margin:2px 0 0;font-style:italic;">→ {{ row.cleanedName }}</p>
+                          <p style="font-size:11px;color:#9CA3AF;margin:2px 0 0;font-style:italic;">
+                            → {{ row.cleanedName }}
+                            <span style="margin-left:6px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;padding:1px 6px;border-radius:4px;font-style:normal;"
+                                  [style.background]="row.mappingSource === 'remembered' ? '#dcfce7' : row.mappingSource === 'auto-match' ? '#fef3c7' : '#fee2e2'"
+                                  [style.color]="row.mappingSource === 'remembered' ? '#065f46' : row.mappingSource === 'auto-match' ? '#92400e' : '#991b1b'">
+                              {{ row.mappingSource === 'remembered' ? 'Remembered' : row.mappingSource === 'auto-match' ? 'Auto-match' : 'Unmapped' }}
+                            </span>
+                          </p>
                         </div>
                         <span style="font-size:13px;font-weight:700;color:#121212;text-align:right;">{{ row.quantityBoxes }}</span>
                         <select [(ngModel)]="row.flavorId" class="gg-input" style="font-size:13px;">
@@ -268,17 +276,22 @@ export class PdfImportModalComponent {
       const text = await this.importer.extractText(file);
       const invoices = this.importer.parseZohoInvoices(text);
 
-      // Fetch flavours, customers, and existing invoices (by number) for the whole batch.
+      // Fetch flavours, customers, existing invoices (by number), and the learned
+      // alias map. Aliases let us auto-map descriptions the user has previously
+      // mapped by hand — matched exactly on raw PDF description text.
       const numbers = invoices.map(i => i.invoiceNumber);
-      const [flavorsRes, customersRes, existingRes] = await Promise.all([
+      const [flavorsRes, customersRes, existingRes, aliasesRes] = await Promise.all([
         this.supabase.client.from('gg_flavors').select('id, name').order('name'),
         this.supabase.client.from('gg_customers').select('id, name').order('name'),
         this.supabase.client.from('gg_invoices').select('id, invoice_number, is_dispatched').in('invoice_number', numbers),
+        this.supabase.client.from('gg_invoice_flavor_aliases').select('description, flavor_id'),
       ]);
       const flavors   = (flavorsRes.data   ?? []) as Array<{ id: string; name: string }>;
       const customers = (customersRes.data ?? []) as Array<{ id: string; name: string }>;
       const existing  = (existingRes.data  ?? []) as Array<{ id: string; invoice_number: string; is_dispatched: boolean }>;
+      const aliasRows = (aliasesRes.data   ?? []) as Array<{ description: string; flavor_id: string }>;
       const existingByNumber = new Map(existing.map(e => [e.invoice_number, e]));
+      const aliasMap         = new Map(aliasRows.map(a => [a.description, a.flavor_id]));
 
       this.flavors.set(flavors);
       this.customers.set(customers);
@@ -289,12 +302,23 @@ export class PdfImportModalComponent {
         return {
           invoice: inv,
           customerId: customers.find(c => norm(c.name) === norm(inv.customerName))?.id ?? '',
-          items: inv.items.map(it => ({
-            description: it.description,
-            cleanedName: it.cleanedName,
-            quantityBoxes: it.quantityBoxes,
-            flavorId: pickFlavor(it.cleanedName, flavors),
-          })),
+          items: inv.items.map(it => {
+            // Alias hit (previously mapped this exact description) → remembered.
+            // Otherwise fall back to fuzzy substring match → auto-match.
+            // If neither yields anything → unmapped.
+            const aliasHit = aliasMap.get(it.description) ?? '';
+            const flavorId = aliasHit || pickFlavor(it.cleanedName, flavors);
+            const source: ItemRow['mappingSource'] = aliasHit
+              ? 'remembered'
+              : (flavorId ? 'auto-match' : 'unmapped');
+            return {
+              description: it.description,
+              cleanedName: it.cleanedName,
+              quantityBoxes: it.quantityBoxes,
+              flavorId,
+              mappingSource: source,
+            };
+          }),
           existingInvoiceId: existRow?.id ?? null,
           existsWarning: existRow
             ? (existRow.is_dispatched
@@ -349,15 +373,37 @@ export class PdfImportModalComponent {
         }
 
         // Aggregate items: collapse duplicates (same flavour twice → sum).
-        const byFlavor = new Map<string, { flavor_id: string; flavor_name: string; quantity_boxes: number }>();
+        // We also carry the raw PDF description into the stored item so future
+        // alias-table backfills work if this table ever needs to be rebuilt.
+        const byFlavor = new Map<string, { flavor_id: string; flavor_name: string; quantity_boxes: number; description: string }>();
         for (const row of form.items) {
           if (!row.flavorId) continue;
           const fname = this.flavors().find(f => f.id === row.flavorId)?.name ?? '';
           const ex = byFlavor.get(row.flavorId);
           if (ex) ex.quantity_boxes += row.quantityBoxes;
-          else byFlavor.set(row.flavorId, { flavor_id: row.flavorId, flavor_name: fname, quantity_boxes: row.quantityBoxes });
+          else byFlavor.set(row.flavorId, {
+            flavor_id: row.flavorId,
+            flavor_name: fname,
+            quantity_boxes: row.quantityBoxes,
+            description: row.description,
+          });
         }
         const items = Array.from(byFlavor.values());
+
+        // Silently learn every (description → flavor_id) pair the user confirmed
+        // this round. Fire-and-forget — if the alias upsert fails, the invoice
+        // still saves.
+        const aliasRows = form.items
+          .filter(r => !!r.flavorId && !!r.description)
+          .map(r => ({ description: r.description, flavor_id: r.flavorId, updated_at: new Date().toISOString() }));
+        if (aliasRows.length > 0) {
+          this.supabase.client
+            .from('gg_invoice_flavor_aliases')
+            .upsert(aliasRows, { onConflict: 'description' })
+            .then(({ error }) => {
+              if (error) console.warn('Failed to save flavour aliases:', error);
+            });
+        }
 
         const payload = {
           invoice_number: form.invoice.invoiceNumber,

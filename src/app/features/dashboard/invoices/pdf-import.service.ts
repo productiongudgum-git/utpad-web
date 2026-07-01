@@ -140,7 +140,7 @@ export class PdfImportService {
     //    Intra-state shape (CGST + SGST split — e.g. Karnataka→Karnataka):
     //      <seq> <description> 170410 <qty>(.pcs)? <rate> <cgst%> <cgstAmt> <sgst%> <sgstAmt> <amount>
     //    Both percentages may be decimals (e.g. 2.5% reduced gum-discount rate).
-    const itemRe = /^\s*(\d+)\s+(.+?)\s+170410\s+(\d+(?:\.\d+)?)\s*(?:pcs)?\s+\d+(?:\.\d+)?(?:\s+\d+(?:\.\d+)?%\s+[\d.,]+){1,2}\s+[\d.,]+\s*$/gm;
+    const itemRe = /^\s*(\d+)\s+(Gud.+?)\s+170410\s+(\d+(?:\.\d+)?)\s*(?:pcs)?\s+\d+(?:\.\d+)?(?:\s+\d+(?:\.\d+)?%\s+[\d.,]+){1,2}\s+[\d.,]+\s*$/gm;
     const items: PdfInvoiceItem[] = [];
     let m: RegExpExecArray | null;
     while ((m = itemRe.exec(normalized)) !== null) {
@@ -224,8 +224,12 @@ export class PdfImportService {
     // HSN codes in the same document. The description may also wrap onto a second
     // line for clarifying notes (e.g. "Cola Charge & Cola Caffeine are the same.")
     // so we use [\s\S]+? (any char including newline) instead of .+?.
-    //   <seq> <description, maybe multi-line> 170410(00)? <qty>(.pcs)? <rate> <amount>
-    const itemRe = /^\s*(\d+)\s+([\s\S]+?)\s+170410(?:00)?\s+(\d+(?:\.\d+)?)\s*(?:pcs)?\s+\d+(?:\.\d+)?\s+[\d.,]+\s*$/gm;
+    //   <seq> Gud <description, maybe multi-line> 170410(00)? <qty>(.pcs)? <rate> <amount>
+    //
+    // Anchoring description to start with "Gud" so header/address text (like
+    // "Place Of Supply : Haryana India # Item & Description HSN/SAC Qty Rate Amount")
+    // can't get pulled into the first item's description group.
+    const itemRe = /^\s*(\d+)\s+(Gud[\s\S]+?)\s+170410(?:00)?\s+(\d+(?:\.\d+)?)\s*(?:pcs)?\s+\d+(?:\.\d+)?\s+[\d.,]+\s*$/gm;
     const items: PdfInvoiceItem[] = [];
     let m: RegExpExecArray | null;
     while ((m = itemRe.exec(normalized)) !== null) {
