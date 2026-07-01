@@ -142,13 +142,17 @@ export class PdfImportService {
     //    Both percentages may be decimals (e.g. 2.5% reduced gum-discount rate).
     // Description may span multiple lines with clarifying notes (e.g. "8 outers +
     // 4 samples" / "MRP 200" under the flavour name), so use [\s\S]+? instead of
-    // .+? to allow newlines inside the capture. The Gud anchor still prevents
-    // header/address text from being pulled into the description.
-    const itemRe = /^\s*(\d+)\s+(Gud[\s\S]+?)\s+170410\s+(\d+(?:\.\d+)?)\s*(?:pcs)?\s+\d+(?:\.\d+)?(?:\s+\d+(?:\.\d+)?%\s+[\d.,]+){1,2}\s+[\d.,]+\s*$/gm;
+    // .+? to allow newlines inside the capture. Same PDF can mix 8-digit
+    // (17041000) and 6-digit (170410) HSN codes across items, so accept both.
+    // The Gud anchor still prevents header/address text from being pulled in.
+    const itemRe = /^\s*(\d+)\s+(Gud[\s\S]+?)\s+170410(?:00)?\s+(\d+(?:\.\d+)?)\s*(?:pcs)?\s+\d+(?:\.\d+)?(?:\s+\d+(?:\.\d+)?%\s+[\d.,]+){1,2}\s+[\d.,]+\s*$/gm;
     const items: PdfInvoiceItem[] = [];
     let m: RegExpExecArray | null;
     while ((m = itemRe.exec(normalized)) !== null) {
-      const description = m[2].trim();
+      // Drop everything past the first line — Zoho puts "8 outers + 4 samples"
+      // and "MRP 200" clarifying notes underneath the flavour name that vary
+      // between invoices and would prevent aliases from repeat-matching.
+      const description = firstLine(m[2]);
       items.push({
         description,
         cleanedName: cleanFlavorName(description),
@@ -237,7 +241,9 @@ export class PdfImportService {
     const items: PdfInvoiceItem[] = [];
     let m: RegExpExecArray | null;
     while ((m = itemRe.exec(normalized)) !== null) {
-      const description = m[2].trim();
+      // First line only — challan notes ("Cola Charge & Cola Caffeine are the
+      // same." etc.) vary between customers and would defeat alias matching.
+      const description = firstLine(m[2]);
       items.push({
         description,
         cleanedName: cleanFlavorName(description),
@@ -289,4 +295,13 @@ function cleanFlavorName(description: string): string {
 function toIsoDate(ddmmyyyy: string): string {
   const [d, m, y] = ddmmyyyy.split('/');
   return `${y}-${m}-${d}`;
+}
+
+/** Take just the first non-empty line of a multi-line item description. */
+function firstLine(s: string): string {
+  for (const line of s.split('\n')) {
+    const t = line.trim();
+    if (t) return t;
+  }
+  return s.trim();
 }
