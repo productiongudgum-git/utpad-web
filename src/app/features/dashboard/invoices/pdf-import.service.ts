@@ -140,7 +140,11 @@ export class PdfImportService {
     //    Intra-state shape (CGST + SGST split — e.g. Karnataka→Karnataka):
     //      <seq> <description> 170410 <qty>(.pcs)? <rate> <cgst%> <cgstAmt> <sgst%> <sgstAmt> <amount>
     //    Both percentages may be decimals (e.g. 2.5% reduced gum-discount rate).
-    const itemRe = /^\s*(\d+)\s+(Gud.+?)\s+170410\s+(\d+(?:\.\d+)?)\s*(?:pcs)?\s+\d+(?:\.\d+)?(?:\s+\d+(?:\.\d+)?%\s+[\d.,]+){1,2}\s+[\d.,]+\s*$/gm;
+    // Description may span multiple lines with clarifying notes (e.g. "8 outers +
+    // 4 samples" / "MRP 200" under the flavour name), so use [\s\S]+? instead of
+    // .+? to allow newlines inside the capture. The Gud anchor still prevents
+    // header/address text from being pulled into the description.
+    const itemRe = /^\s*(\d+)\s+(Gud[\s\S]+?)\s+170410\s+(\d+(?:\.\d+)?)\s*(?:pcs)?\s+\d+(?:\.\d+)?(?:\s+\d+(?:\.\d+)?%\s+[\d.,]+){1,2}\s+[\d.,]+\s*$/gm;
     const items: PdfInvoiceItem[] = [];
     let m: RegExpExecArray | null;
     while ((m = itemRe.exec(normalized)) !== null) {
