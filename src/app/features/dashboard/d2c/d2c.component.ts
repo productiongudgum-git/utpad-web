@@ -310,30 +310,75 @@ const OPS_API = 'https://utpad-ops-api-seven.vercel.app/api/v1/ops';
             <table style="width:100%;border-collapse:collapse;">
               <thead>
                 <tr style="border-bottom:1px solid #E5E7EB;">
+                  <th style="text-align:left;padding:10px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;width:32px;"></th>
                   <th style="text-align:left;padding:10px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Flavour</th>
                   <th style="text-align:right;padding:10px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Allocated</th>
                   <th style="text-align:right;padding:10px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                @for (alloc of channelAllocations(); track alloc.id) {
-                  <tr style="border-bottom:1px solid #f3f4f6;">
-                    <td style="padding:14px 16px;font-size:14px;font-weight:600;color:#121212;">{{ alloc.flavor_name }}</td>
+                @for (grp of channelAllocationGroups(); track grp.flavor_id) {
+                  <!-- Group summary row -->
+                  <tr style="border-bottom:1px solid #f3f4f6;cursor:pointer;" (click)="toggleAllocationGroup(grp.flavor_id)">
+                    <td style="padding:14px 12px;text-align:center;">
+                      <span class="material-icons-round" style="font-size:16px;color:#6B7280;transition:transform 0.15s;"
+                            [style.transform]="isAllocationGroupExpanded(grp.flavor_id) ? 'rotate(90deg)' : 'rotate(0deg)'">
+                        chevron_right
+                      </span>
+                    </td>
+                    <td style="padding:14px 16px;font-size:14px;font-weight:600;color:#121212;">
+                      {{ grp.flavor_name }}
+                      @if (grp.allocations.length > 1) {
+                        <span style="margin-left:8px;background:#f3f4f6;color:#6B7280;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">
+                          {{ grp.allocations.length }} entries
+                        </span>
+                      }
+                    </td>
                     <td style="padding:14px 16px;text-align:right;">
-                      <span style="font-size:15px;font-weight:700;color:#121212;">{{ alloc.boxes_allocated }}</span>
+                      <span style="font-size:15px;font-weight:700;color:#121212;">{{ grp.total_boxes }}</span>
                       <span style="font-size:12px;color:#6B7280;"> boxes</span>
                     </td>
-                    <td style="padding:14px 16px;text-align:right;">
-                      <button (click)="openEditAllocationModal(alloc)"
-                              style="padding:5px 12px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;margin-right:6px;">
-                        Edit
-                      </button>
-                      <button (click)="openDeleteModal(alloc)"
-                              style="padding:5px 12px;background:#fff5f5;color:#dc2626;border:1px solid #fca5a5;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">
-                        Delete
-                      </button>
+                    <td style="padding:14px 16px;text-align:right;font-size:12px;color:#9CA3AF;">
+                      @if (grp.allocations.length === 1) {
+                        <button (click)="openEditAllocationModal(grp.allocations[0]); $event.stopPropagation()"
+                                style="padding:5px 12px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;margin-right:6px;">
+                          Edit
+                        </button>
+                        <button (click)="openDeleteModal(grp.allocations[0]); $event.stopPropagation()"
+                                style="padding:5px 12px;background:#fff5f5;color:#dc2626;border:1px solid #fca5a5;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">
+                          Delete
+                        </button>
+                      } @else {
+                        <span>expand to edit</span>
+                      }
                     </td>
                   </tr>
+                  <!-- Individual allocation rows (visible when expanded) -->
+                  @if (isAllocationGroupExpanded(grp.flavor_id) && grp.allocations.length > 1) {
+                    @for (alloc of grp.allocations; track alloc.id) {
+                      <tr style="border-bottom:1px solid #f3f4f6;background:#fafafa;">
+                        <td></td>
+                        <td style="padding:10px 16px 10px 32px;font-size:13px;color:#6B7280;">
+                          <span class="material-icons-round" style="font-size:12px;vertical-align:-2px;color:#9CA3AF;">subdirectory_arrow_right</span>
+                          allocation #{{ $index + 1 }}
+                        </td>
+                        <td style="padding:10px 16px;text-align:right;">
+                          <span style="font-size:13px;font-weight:600;color:#374151;">{{ alloc.boxes_allocated }}</span>
+                          <span style="font-size:11px;color:#9CA3AF;"> boxes</span>
+                        </td>
+                        <td style="padding:10px 16px;text-align:right;">
+                          <button (click)="openEditAllocationModal(alloc)"
+                                  style="padding:4px 10px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;margin-right:6px;">
+                            Edit
+                          </button>
+                          <button (click)="openDeleteModal(alloc)"
+                                  style="padding:4px 10px;background:#fff5f5;color:#dc2626;border:1px solid #fca5a5;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;">
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    }
+                  }
                 }
               </tbody>
             </table>
@@ -555,6 +600,46 @@ export class D2CComponent implements OnInit {
   channelAllocations = computed(() =>
     this.allocations().filter(a => a.channel_name === this.selectedChannel())
   );
+
+  /**
+   * Group individual gg_d2c_allocations rows by flavour so users see one row per
+   * flavour with the summed box count. Underlying rows stay in the DB — the
+   * expand chevron reveals them, and Edit/Delete still act on individual rows.
+   */
+  channelAllocationGroups = computed(() => {
+    const byFlavor = new Map<string, { flavor_id: string; flavor_name: string; allocations: D2CAllocation[]; total_boxes: number }>();
+    for (const a of this.channelAllocations()) {
+      const g = byFlavor.get(a.flavor_id);
+      if (g) {
+        g.allocations.push(a);
+        g.total_boxes += Number(a.boxes_allocated) || 0;
+      } else {
+        byFlavor.set(a.flavor_id, {
+          flavor_id: a.flavor_id,
+          flavor_name: a.flavor_name,
+          allocations: [a],
+          total_boxes: Number(a.boxes_allocated) || 0,
+        });
+      }
+    }
+    return Array.from(byFlavor.values()).sort((x, y) => x.flavor_name.localeCompare(y.flavor_name));
+  });
+
+  /** Which grouped rows are expanded to reveal their individual allocations. */
+  expandedAllocationGroups = signal<Set<string>>(new Set());
+
+  isAllocationGroupExpanded(flavorId: string): boolean {
+    return this.expandedAllocationGroups().has(flavorId);
+  }
+
+  toggleAllocationGroup(flavorId: string): void {
+    this.expandedAllocationGroups.update(s => {
+      const next = new Set(s);
+      if (next.has(flavorId)) next.delete(flavorId);
+      else next.add(flavorId);
+      return next;
+    });
+  }
 
   // Modal state
   showAddChannelModal  = signal(false);
