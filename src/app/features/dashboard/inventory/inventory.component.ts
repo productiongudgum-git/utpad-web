@@ -7,12 +7,43 @@ function fmtDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+/**
+ * INVENTORY STOCK MODEL (all-time balance, not per-period)
+ * ────────────────────────────────────────────────────────
+ * Stock is a running balance across ALL history. The date pickers do NOT
+ * affect the stock math — they only drive the "Dispatched (in period)"
+ * movement column.
+ *
+ * For each (flavor, batch), summed over all time:
+ *   packed    = Σ packing_sessions.boxes_packed  (incl. opening-stock rows)
+ *   shipped   = Σ dispatch_events.boxes_dispatched  where the event is DISPATCHED
+ *   reserved  = Σ dispatch_events.boxes_dispatched  where the event is RESERVED
+ *   returned  = Σ returns_events.qty_returned
+ *
+ * A dispatch_event counts as DISPATCHED when event.is_dispatched = true OR its
+ * parent invoice (matched by invoice_number) has is_dispatched = true (mobile's
+ * "blue dispatch" flips the invoice flag but not the event flag). Otherwise it
+ * is RESERVED (committed to an order, still physically in the warehouse).
+ *
+ * Derived:
+ *   onHand    = packed − shipped + returned      (physically on the shelf)
+ *   available = onHand − reserved                (sellable right now)
+ *
+ * Returns fold straight back into sellable stock (business decision).
+ * Negatives are shown (in red) as a warning, never clamped to 0 — clamping is
+ * what hid the old bugs. Flavor totals are plain sums of their batch rows, so
+ * the header can never disagree with the expanded detail.
+ */
+
 interface BatchDetail {
   batchCode: string;
-  boxesPacked: number;
-  netStock: number;   // packed − dispatched (physically here)
-  reserved: number;   // boxes committed to packed-but-not-dispatched invoices
-  available: number;  // netStock − reserved (sellable now)
+  packed: number;
+  shipped: number;              // all-time dispatched
+  returned: number;             // all-time returned
+  onHand: number;               // packed − shipped + returned
+  reserved: number;             // committed, not yet shipped
+  available: number;            // onHand − reserved
+  dispatchedInPeriod: number;   // movement column — shipped within [from, to]
 }
 
 interface ReservedInvoice {
@@ -27,10 +58,12 @@ interface FlavorGroup {
   flavorId: string;
   flavorName: string;
   totalPacked: number;
-  totalDispatched: number;
-  netStock: number;       // totalPacked − totalDispatched
-  totalReserved: number;  // sum of staged dispatch_events for this flavor
-  available: number;      // netStock − totalReserved
+  totalShipped: number;
+  totalReturned: number;
+  onHand: number;               // totalPacked − totalShipped + totalReturned
+  totalReserved: number;
+  available: number;            // onHand − totalReserved
+  dispatchedInPeriod: number;   // sum of batch dispatchedInPeriod
   batches: BatchDetail[];
   reservedInvoices: ReservedInvoice[];  // who's holding the reservation
 }
@@ -44,7 +77,7 @@ interface FlavorGroup {
       <div style="margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
         <div>
           <h1 style="font-family:'Cabin',sans-serif;font-size:22px;font-weight:700;color:#121212;margin:0 0 4px;">Inventory</h1>
-          <p style="color:#6B7280;font-size:14px;margin:0;">Net box stock by flavor — only <strong>Available</strong> is shown at a glance. Expand a row for Packed, Dispatched, Net Stock and Reserved.</p>
+          <p style="color:#6B7280;font-size:14px;margin:0;">Live sellable stock by flavor. <strong>Available</strong> is always current (all-time). Expand a row for Packed, Dispatched, Returned, On-hand and Reserved.</p>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
           <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#374151;cursor:pointer;background:#f3f4f6;border:1px solid #E5E7EB;border-radius:8px;padding:7px 12px;">
@@ -58,8 +91,9 @@ interface FlavorGroup {
         </div>
       </div>
 
-      <!-- Date range filter -->
-      <div style="margin-bottom:20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <!-- Movement period filter — affects ONLY the "Dispatched (in period)" figure. Stock is always live. -->
+      <div style="margin-bottom:20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#f8f9fa;border:1px solid #E5E7EB;border-radius:8px;padding:10px 14px;">
+        <span style="font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.4px;">Movement period</span>
         <div style="display:flex;align-items:center;gap:8px;">
           <label style="font-size:13px;font-weight:600;color:#6B7280;white-space:nowrap;">From</label>
           <input type="date" [value]="fromDate()"
@@ -72,6 +106,7 @@ interface FlavorGroup {
                  (change)="onToDateChange($event)"
                  style="padding:7px 10px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;color:#374151;background:#fff;cursor:pointer;outline:none;">
         </div>
+        <span style="font-size:12px;color:#9CA3AF;">Only the “Dispatched (period)” column uses these dates — Available is always all-time.</span>
       </div>
 
       @if (loading()) {
@@ -83,7 +118,7 @@ interface FlavorGroup {
       } @else if (flavors().length === 0) {
         <div style="text-align:center;padding:60px 0;color:#9CA3AF;">
           <span class="material-icons-round" style="font-size:48px;display:block;margin-bottom:12px;">inventory_2</span>
-          <p style="font-size:15px;margin:0;">No packing session data found.</p>
+          <p style="font-size:15px;margin:0;">No stock data found.</p>
         </div>
       } @else if (filteredFlavors().length === 0 && showOnlyLow()) {
         <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
@@ -135,12 +170,12 @@ interface FlavorGroup {
                   <td style="padding:12px 16px;text-align:right;">
                     <span style="display:inline-flex;align-items:center;gap:6px;justify-content:flex-end;">
                       @if (isOut(fg)) {
-                        <span class="material-icons-round" style="font-size:16px;color:#dc2626;" title="Out of stock">dangerous</span>
+                        <span class="material-icons-round" style="font-size:16px;color:#dc2626;" title="Out of stock / oversold">dangerous</span>
                       } @else if (isLow(fg)) {
                         <span class="material-icons-round" style="font-size:16px;color:#ea580c;" title="Low stock">warning_amber</span>
                       }
                       <span style="font-size:14px;font-weight:700;"
-                            [style.color]="isOut(fg) ? '#dc2626' : isLow(fg) ? '#ea580c' : '#01AC51'">
+                            [style.color]="fg.available < 0 ? '#dc2626' : isOut(fg) ? '#dc2626' : isLow(fg) ? '#ea580c' : '#01AC51'">
                         {{ fg.available | number:'1.0-0' }}
                       </span>
                     </span>
@@ -152,6 +187,16 @@ interface FlavorGroup {
                   <tr>
                     <td colspan="3" style="padding:0;background:#f8f9fa;border-bottom:1px solid #E5E7EB;">
                       <div style="padding:0 16px 12px 60px;">
+                        <!-- Flavor-level summary line -->
+                        <div style="display:flex;flex-wrap:wrap;gap:16px;margin:14px 0 4px;font-size:12px;color:#6B7280;">
+                          <span>Packed: <strong style="color:#374151;">{{ fg.totalPacked | number:'1.0-0' }}</strong></span>
+                          <span>Dispatched: <strong style="color:#dc2626;">{{ fg.totalShipped | number:'1.0-0' }}</strong></span>
+                          <span>Returned: <strong style="color:#2563eb;">{{ fg.totalReturned | number:'1.0-0' }}</strong></span>
+                          <span>On-hand: <strong [style.color]="fg.onHand < 0 ? '#dc2626' : '#374151'">{{ fg.onHand | number:'1.0-0' }}</strong></span>
+                          <span>Reserved: <strong style="color:#b45309;">{{ fg.totalReserved | number:'1.0-0' }}</strong></span>
+                          <span style="color:#9CA3AF;">Dispatched {{ fromDate() }} → {{ toDate() }}: <strong style="color:#374151;">{{ fg.dispatchedInPeriod | number:'1.0-0' }}</strong></span>
+                        </div>
+
                         <p style="font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.5px;margin:14px 0 6px;">Batches</p>
                         <table style="width:100%;border-collapse:collapse;margin-top:4px;">
                           <thead>
@@ -159,7 +204,8 @@ interface FlavorGroup {
                               <th style="text-align:left;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Batch Code</th>
                               <th style="text-align:right;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Packed</th>
                               <th style="text-align:right;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Dispatched</th>
-                              <th style="text-align:right;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Net Stock</th>
+                              <th style="text-align:right;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Returned</th>
+                              <th style="text-align:right;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">On-hand</th>
                               <th style="text-align:right;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Reserved</th>
                               <th style="text-align:right;padding:6px 12px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Available</th>
                             </tr>
@@ -169,13 +215,17 @@ interface FlavorGroup {
                               <tr style="border-bottom:1px solid #f3f4f6;">
                                 <td style="padding:8px 12px;font-size:12px;font-weight:600;color:#374151;font-family:monospace;">{{ b.batchCode }}</td>
                                 <td style="padding:8px 12px;text-align:right;font-size:12px;color:#374151;">
-                                  {{ b.boxesPacked | number:'1.0-0' }}
+                                  {{ b.packed | number:'1.0-0' }}
                                 </td>
                                 <td style="padding:8px 12px;text-align:right;font-size:12px;color:#dc2626;">
-                                  {{ (b.boxesPacked - b.netStock) | number:'1.0-0' }}
+                                  {{ b.shipped | number:'1.0-0' }}
                                 </td>
-                                <td style="padding:8px 12px;text-align:right;font-size:12px;color:#374151;">
-                                  {{ b.netStock | number:'1.0-0' }}
+                                <td style="padding:8px 12px;text-align:right;font-size:12px;color:#2563eb;">
+                                  {{ b.returned | number:'1.0-0' }}
+                                </td>
+                                <td style="padding:8px 12px;text-align:right;font-size:12px;"
+                                    [style.color]="b.onHand < 0 ? '#dc2626' : '#374151'">
+                                  {{ b.onHand | number:'1.0-0' }}
                                 </td>
                                 <td style="padding:8px 12px;text-align:right;font-size:12px;color:#b45309;">
                                   {{ b.reserved | number:'1.0-0' }}
@@ -241,9 +291,12 @@ interface FlavorGroup {
             @if (lowCount() > 0) {
               <span style="color:#ea580c;font-weight:600;">· {{ lowCount() }} low</span>
             }
+            @if (negativeCount() > 0) {
+              <span style="color:#dc2626;font-weight:600;">· {{ negativeCount() }} oversold</span>
+            }
           </span>
           <span>Available total: <strong style="color:#01AC51;">{{ grandAvailable() | number:'1.0-0' }}</strong></span>
-          <span style="color:#9CA3AF;">Expand a row for Packed / Dispatched / Net / Reserved.</span>
+          <span style="color:#9CA3AF;">Dispatched in period: <strong style="color:#374151;">{{ grandDispatchedInPeriod() | number:'1.0-0' }}</strong></span>
         </div>
       }
     </div>
@@ -253,6 +306,10 @@ export class InventoryComponent implements OnInit, OnDestroy {
   private readonly supabase = inject(SupabaseService);
   private channel: RealtimeChannel | null = null;
   private reloadDebounce: ReturnType<typeof setTimeout> | null = null;
+
+  // Pull a generous cap so large tables aren't silently truncated to the
+  // PostgREST default (1000 rows), which would corrupt the stock totals.
+  private readonly ROW_CAP = 100000;
 
   // Below this many "available" boxes a flavour is flagged low (inclusive of 100).
   readonly LOW_THRESHOLD = 100;
@@ -284,7 +341,11 @@ export class InventoryComponent implements OnInit, OnDestroy {
   });
 
   readonly lowCount = computed(() =>
-    this.flavors().filter(f => f.available <= this.LOW_THRESHOLD).length,
+    this.flavors().filter(f => f.available > 0 && f.available <= this.LOW_THRESHOLD).length,
+  );
+
+  readonly negativeCount = computed(() =>
+    this.flavors().filter(f => f.available < 0).length,
   );
 
   // ── Low-stock helpers ────────────────────────────────────────────────────
@@ -293,6 +354,7 @@ export class InventoryComponent implements OnInit, OnDestroy {
 
   rowBackground(fg: FlavorGroup): string {
     if (this.expandedFlavorId() === fg.flavorId) return '#f0fdf4';
+    if (fg.available < 0) return '#fef2f2';
     if (this.isOut(fg)) return '#fef2f2';
     if (this.isLow(fg)) return '#fffbeb';
     return '#fff';
@@ -304,17 +366,20 @@ export class InventoryComponent implements OnInit, OnDestroy {
   readonly grandTotalPacked = computed(() =>
     this.flavors().reduce((s, fg) => s + fg.totalPacked, 0)
   );
-  readonly grandTotalDispatched = computed(() =>
-    this.flavors().reduce((s, fg) => s + fg.totalDispatched, 0)
+  readonly grandTotalShipped = computed(() =>
+    this.flavors().reduce((s, fg) => s + fg.totalShipped, 0)
   );
-  readonly grandNetStock = computed(() =>
-    this.flavors().reduce((s, fg) => s + fg.netStock, 0)
+  readonly grandOnHand = computed(() =>
+    this.flavors().reduce((s, fg) => s + fg.onHand, 0)
   );
   readonly grandTotalReserved = computed(() =>
     this.flavors().reduce((s, fg) => s + fg.totalReserved, 0)
   );
   readonly grandAvailable = computed(() =>
     this.flavors().reduce((s, fg) => s + fg.available, 0)
+  );
+  readonly grandDispatchedInPeriod = computed(() =>
+    this.flavors().reduce((s, fg) => s + fg.dispatchedInPeriod, 0)
   );
 
   async ngOnInit(): Promise<void> {
@@ -334,15 +399,16 @@ export class InventoryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Live updates: any change to dispatch_events or packing_sessions
-   * triggers a reload. Debounced 400ms so a burst of mobile dispatches
-   * (e.g. 4 line items all flipping at once) only reloads once.
+   * Live updates: any change to dispatch_events, packing_sessions,
+   * returns_events or gg_invoices triggers a reload. Debounced 400ms so a
+   * burst of mobile dispatches only reloads once.
    */
   private subscribeRealtime(): void {
     this.channel = this.supabase.client
       .channel('inventory-rt')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'dispatch_events' },  () => this.scheduleReload())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'packing_sessions' }, () => this.scheduleReload())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'returns_events' },    () => this.scheduleReload())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'gg_invoices' },       () => this.scheduleReload())
       .subscribe();
   }
@@ -370,11 +436,11 @@ export class InventoryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Show batches that have either physical stock or active reservations.
-   * Filters out fully-empty batches (nothing left, nothing reserved).
+   * Show batches that carry any physical stock, reservation, or return.
+   * Filters out fully-empty, fully-settled batches.
    */
   relevantBatches(batches: BatchDetail[]): BatchDetail[] {
-    return batches.filter(b => b.netStock > 0 || b.reserved > 0);
+    return batches.filter(b => b.onHand !== 0 || b.reserved > 0 || b.returned > 0);
   }
 
   async loadData(): Promise<void> {
@@ -382,37 +448,47 @@ export class InventoryComponent implements OnInit, OnDestroy {
     const from = this.fromDate();
     const to = this.toDate();
 
-    // ── 1. Fetch packing sessions filtered by date range ────────────
+    // ── Fetch everything ALL-TIME (stock is a running balance). The date range
+    //    is applied only to the movement column, in code, after the fetch. ──
     const sessionsP = this.supabase.client
       .from('packing_sessions')
-      .select('batch_code, boxes_packed, flavor_id, flavor:gg_flavors!packing_sessions_flavor_id_fkey(name)')
-      .gte('session_date', from)
-      .lte('session_date', to);
+      .select('batch_code, boxes_packed, flavor_id')
+      .limit(this.ROW_CAP);
 
-    // ── 2. Fetch ALL dispatch_events ─────────────────────────────────
-    //   Mobile's submitBlueDispatch only flips gg_invoices.is_dispatched
-    //   and leaves dispatch_events.is_dispatched untouched. So we can't
-    //   trust the event's own flag — we bucket by the parent invoice's
-    //   is_dispatched instead.
-    //
-    //   Includes invoice_number + customer_name so the expanded row can
-    //   show "who is holding this reservation".
     const eventsP = this.supabase.client
       .from('dispatch_events')
-      .select('flavor_id, sku_id, batch_code, boxes_dispatched, invoice_number, customer_name, dispatch_date, is_dispatched');
+      .select('flavor_id, sku_id, batch_code, boxes_dispatched, invoice_number, customer_name, dispatch_date, is_dispatched')
+      .limit(this.ROW_CAP);
 
-    // ── 3. Fetch invoice statuses + items ────────────────────────────
-    //   Source of truth for "is this invoice dispatched yet?" plus the
-    //   quantity_boxes per flavor (used to compute partial vs full pack
-    //   in the Reserved-by-invoice expand).
     const invoicesP = this.supabase.client
       .from('gg_invoices')
-      .select('invoice_number, is_packed, is_dispatched, items');
+      .select('invoice_number, is_packed, is_dispatched, items')
+      .limit(this.ROW_CAP);
 
-    const [{ data: sessions }, { data: allEvents }, { data: invoicesData }] =
-      await Promise.all([sessionsP, eventsP, invoicesP]);
+    const returnsP = this.supabase.client
+      .from('returns_events')
+      .select('sku_id, batch_code, qty_returned')
+      .limit(this.ROW_CAP);
 
-    // Map invoice_number → status flags + needed-boxes-per-flavor
+    const flavorsP = this.supabase.client
+      .from('gg_flavors')
+      .select('id, name');
+
+    const [
+      { data: sessions },
+      { data: allEvents },
+      { data: invoicesData },
+      { data: returnsData },
+      { data: flavorsData },
+    ] = await Promise.all([sessionsP, eventsP, invoicesP, returnsP, flavorsP]);
+
+    // Flavor id → name (authoritative, so reserved/returned-only flavors still get a name).
+    const flavorNameMap = new Map<string, string>();
+    for (const f of (flavorsData ?? []) as any[]) {
+      flavorNameMap.set(String(f.id), f.name ?? 'Unknown');
+    }
+
+    // Invoice number → status flags + needed-boxes-per-flavor.
     const invoiceStatus = new Map<
       string,
       { is_packed: boolean; is_dispatched: boolean; needsByFlavor: Map<string, number> }
@@ -433,56 +509,61 @@ export class InventoryComponent implements OnInit, OnDestroy {
       });
     }
 
-    // Walk every event once, bucket by its parent invoice's flags.
-    const dispatchedMap      = new Map<string, number>();
-    const batchDispatchedMap = new Map<string, number>();
-    const reservedFlavorMap  = new Map<string, number>();
-    const reservedBatchMap   = new Map<string, number>();
+    // ── Per-(flavor|batch) accumulators, all-time ──
+    const packedBatchMap   = new Map<string, number>();  // packed
+    const shippedBatchMap  = new Map<string, number>();  // dispatched (all-time)
+    const reservedBatchMap = new Map<string, number>();  // reserved
+    const returnedBatchMap = new Map<string, number>();  // returned
+    const periodShipBatch  = new Map<string, number>();  // dispatched within [from,to]
+
+    // Per-flavor extras
     const reservedInvoiceMap = new Map<string, Map<string, ReservedInvoice>>();
+    const flavorIds = new Set<string>();
 
+    const key = (fid: string, bc: string) => `${fid}|${bc}`;
+    const splitKey = (k: string): [string, string] => {
+      const i = k.indexOf('|');
+      return [k.substring(0, i), k.substring(i + 1)];
+    };
+
+    // 1. Packing sessions → packed
+    for (const row of (sessions ?? []) as any[]) {
+      const fid = String(row.flavor_id ?? 'unknown');
+      const bc = String(row.batch_code ?? '—');
+      const boxes = Number(row.boxes_packed) || 0;
+      if (boxes === 0) continue;
+      packedBatchMap.set(key(fid, bc), (packedBatchMap.get(key(fid, bc)) ?? 0) + boxes);
+      flavorIds.add(fid);
+    }
+
+    // 2. Dispatch events → shipped or reserved (classified by event OR invoice flag)
     for (const ev of (allEvents ?? []) as any[]) {
-      const fid: string = ev.flavor_id ?? ev.sku_id ?? '';
-      const bc:  string = ev.batch_code ?? '';
-      const qty: number = Number(ev.boxes_dispatched) || 0;
-      const inv: string = ev.invoice_number ?? '';
-      const cust: string = ev.customer_name ?? '—';
-      const date: string = ev.dispatch_date ?? '';
+      const fid = String(ev.flavor_id ?? ev.sku_id ?? '');
+      const bc = String(ev.batch_code ?? '—');
+      const qty = Number(ev.boxes_dispatched) || 0;
+      const inv = ev.invoice_number ?? '';
+      const cust = ev.customer_name ?? '—';
+      const date = ev.dispatch_date ?? '';
       if (!fid || qty <= 0) continue;
+      flavorIds.add(fid);
 
-      // Determine bucket using BOTH flags (OR):
-      //   Dispatched if event.is_dispatched=true (individual shipment) OR
-      //                 invoice.is_dispatched=true (mobile blue dispatch
-      //                                             flips invoice but not
-      //                                             event flags).
-      //   Reserved otherwise (covers BLUE fully-packed AND YELLOW partial).
-      //
-      // This handles the case where one event of a multi-flavor invoice is
-      // already shipped (event flag true) but other flavors aren't yet, so
-      // the invoice flag is still false. Without OR, the shipped event
-      // would wrongly be counted as Reserved.
       const status = inv ? invoiceStatus.get(inv) : undefined;
       const invoiceDispatched = status ? status.is_dispatched : false;
-      const eventDispatched   = !!ev.is_dispatched;
-      const isDispatched      = invoiceDispatched || eventDispatched;
+      const eventDispatched = !!ev.is_dispatched;
+      const isDispatched = invoiceDispatched || eventDispatched;
 
       if (isDispatched) {
-        // DISPATCHED: applies date filter (only events shipped in range).
+        // Shipped (all-time) — counts toward on-hand reduction regardless of date.
+        shippedBatchMap.set(key(fid, bc), (shippedBatchMap.get(key(fid, bc)) ?? 0) + qty);
+        // Movement column: only shipments whose dispatch_date is inside the range.
         if (date && date >= from && date <= to) {
-          dispatchedMap.set(fid, (dispatchedMap.get(fid) ?? 0) + qty);
-          if (bc) {
-            const key = `${fid}|${bc}`;
-            batchDispatchedMap.set(key, (batchDispatchedMap.get(key) ?? 0) + qty);
-          }
+          periodShipBatch.set(key(fid, bc), (periodShipBatch.get(key(fid, bc)) ?? 0) + qty);
         }
         continue;
       }
 
-      // RESERVED: current-state, no date filter.
-      reservedFlavorMap.set(fid, (reservedFlavorMap.get(fid) ?? 0) + qty);
-      if (bc) {
-        const key = `${fid}|${bc}`;
-        reservedBatchMap.set(key, (reservedBatchMap.get(key) ?? 0) + qty);
-      }
+      // Reserved (committed, still on the shelf) — reduces available, not on-hand.
+      reservedBatchMap.set(key(fid, bc), (reservedBatchMap.get(key(fid, bc)) ?? 0) + qty);
       if (inv) {
         if (!reservedInvoiceMap.has(fid)) reservedInvoiceMap.set(fid, new Map());
         const perFlavor = reservedInvoiceMap.get(fid)!;
@@ -502,76 +583,81 @@ export class InventoryComponent implements OnInit, OnDestroy {
       }
     }
 
-    // After accumulation, recompute partial/full for each reserved invoice
-    // since boxes_reserved may have summed across multiple events for the
-    // same (flavor, invoice). Status depends on the final reserved total.
+    // 3. Returns → returned (folds back into sellable stock)
+    for (const r of (returnsData ?? []) as any[]) {
+      const fid = String(r.sku_id ?? '');
+      const bc = String(r.batch_code ?? '—');
+      const qty = Number(r.qty_returned) || 0;
+      if (!fid || qty <= 0) continue;
+      returnedBatchMap.set(key(fid, bc), (returnedBatchMap.get(key(fid, bc)) ?? 0) + qty);
+      flavorIds.add(fid);
+    }
+
+    // Finalise reserved-invoice partial/full using the summed totals.
     for (const perFlavor of reservedInvoiceMap.values()) {
-      for (const r of perFlavor.values()) {
-        r.status = r.boxes_needed > 0 && r.boxes_reserved < r.boxes_needed ? 'partial' : 'full';
+      for (const rInv of perFlavor.values()) {
+        rInv.status = rInv.boxes_needed > 0 && rInv.boxes_reserved < rInv.boxes_needed ? 'partial' : 'full';
       }
     }
 
-    // Aggregate packing sessions by flavor + batch
-    const groupMap       = new Map<string, FlavorGroup>();
-    const batchPackedMap = new Map<string, number>();
+    // ── Build flavor groups from the union of all batch keys ──
+    const allBatchKeys = new Set<string>([
+      ...packedBatchMap.keys(),
+      ...shippedBatchMap.keys(),
+      ...reservedBatchMap.keys(),
+      ...returnedBatchMap.keys(),
+    ]);
 
-    for (const row of (sessions ?? []) as any[]) {
-      const flavorId: string   = row.flavor_id ?? 'unknown';
-      const flavorName: string = (row.flavor as any)?.name ?? 'Unknown';
-      const boxesPacked: number = Number(row.boxes_packed) || 0;
-      const batchCode: string  = row.batch_code ?? '—';
-      const batchKey           = `${flavorId}|${batchCode}`;
-
-      if (!groupMap.has(flavorId)) {
-        groupMap.set(flavorId, {
-          flavorId, flavorName,
-          totalPacked: 0, totalDispatched: 0, netStock: 0,
-          totalReserved: 0, available: 0,
+    const groupMap = new Map<string, FlavorGroup>();
+    const ensureGroup = (fid: string): FlavorGroup => {
+      let g = groupMap.get(fid);
+      if (!g) {
+        g = {
+          flavorId: fid,
+          flavorName: flavorNameMap.get(fid) ?? '(unknown flavor)',
+          totalPacked: 0, totalShipped: 0, totalReturned: 0,
+          onHand: 0, totalReserved: 0, available: 0,
+          dispatchedInPeriod: 0,
           batches: [], reservedInvoices: [],
-        });
+        };
+        groupMap.set(fid, g);
       }
-      groupMap.get(flavorId)!.totalPacked += boxesPacked;
-      batchPackedMap.set(batchKey, (batchPackedMap.get(batchKey) ?? 0) + boxesPacked);
-    }
+      return g;
+    };
 
-    // Make sure flavors that ONLY have reservations (no packing in date range)
-    // still appear so the user knows about the commitment.
-    for (const fid of reservedFlavorMap.keys()) {
-      if (!groupMap.has(fid)) {
-        groupMap.set(fid, {
-          flavorId: fid, flavorName: '(unknown — no recent packing)',
-          totalPacked: 0, totalDispatched: 0, netStock: 0,
-          totalReserved: 0, available: 0,
-          batches: [], reservedInvoices: [],
-        });
-      }
-    }
+    for (const k of allBatchKeys) {
+      const [fid, bc] = splitKey(k);
+      const packed = packedBatchMap.get(k) ?? 0;
+      const shipped = shippedBatchMap.get(k) ?? 0;
+      const reserved = reservedBatchMap.get(k) ?? 0;
+      const returned = returnedBatchMap.get(k) ?? 0;
+      const dispatchedInPeriod = periodShipBatch.get(k) ?? 0;
+      const onHand = packed - shipped + returned;
+      const available = onHand - reserved;
 
-    // Build batch breakdown per flavor
-    for (const [batchKey, packed] of batchPackedMap) {
-      const sep       = batchKey.indexOf('|');
-      const flavorId  = batchKey.substring(0, sep);
-      const batchCode = batchKey.substring(sep + 1);
-      const batchDispatched = batchDispatchedMap.get(batchKey) ?? 0;
-      const batchReserved   = reservedBatchMap.get(batchKey) ?? 0;
-      const netStock        = packed - batchDispatched;
-      groupMap.get(flavorId)?.batches.push({
-        batchCode,
-        boxesPacked: packed,
-        netStock,
-        reserved: batchReserved,
-        available: netStock - batchReserved,
+      const g = ensureGroup(fid);
+      g.batches.push({
+        batchCode: bc,
+        packed, shipped, returned, onHand, reserved, available,
+        dispatchedInPeriod,
       });
     }
 
-    // Apply flavor-level totals + reservedInvoices breakdown
-    for (const group of groupMap.values()) {
-      group.totalDispatched = dispatchedMap.get(group.flavorId) ?? 0;
-      group.totalReserved   = reservedFlavorMap.get(group.flavorId) ?? 0;
-      group.netStock        = group.totalPacked - group.totalDispatched;
-      group.available       = group.netStock - group.totalReserved;
-      const invMap = reservedInvoiceMap.get(group.flavorId);
-      group.reservedInvoices = invMap
+    // Flavor totals = sums of batch rows (guarantees header == detail).
+    for (const g of groupMap.values()) {
+      for (const b of g.batches) {
+        g.totalPacked += b.packed;
+        g.totalShipped += b.shipped;
+        g.totalReturned += b.returned;
+        g.onHand += b.onHand;
+        g.totalReserved += b.reserved;
+        g.available += b.available;
+        g.dispatchedInPeriod += b.dispatchedInPeriod;
+      }
+      // Sort batches by code for stable display.
+      g.batches.sort((a, b) => a.batchCode.localeCompare(b.batchCode));
+      const invMap = reservedInvoiceMap.get(g.flavorId);
+      g.reservedInvoices = invMap
         ? Array.from(invMap.values()).sort((a, b) => b.boxes_reserved - a.boxes_reserved)
         : [];
     }
