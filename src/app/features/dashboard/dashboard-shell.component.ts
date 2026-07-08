@@ -133,6 +133,7 @@ export class DashboardShellComponent {
     { label: 'Invoices',    icon: 'description',             route: 'invoices' },
     { label: 'Returns',     icon: 'assignment_return',       route: 'returns' },
     { label: 'D2C',         icon: 'storefront',              route: 'd2c' },
+    { label: 'Courier Analysis', icon: 'local_shipping',      route: 'courier-analysis' },
     { label: 'Reports',     icon: 'download',                route: 'reports' },
   ];
 

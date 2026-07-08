@@ -35,6 +35,7 @@ export const routes: Routes = [
       { path: 'dispatch',    loadComponent: () => import('./features/dashboard/dispatch/dispatch.component').then(m => m.DispatchComponent) },
       { path: 'invoices',    loadComponent: () => import('./features/dashboard/invoices/invoices.component').then(m => m.InvoicesComponent) },
       { path: 'd2c',         loadComponent: () => import('./features/dashboard/d2c/d2c.component').then(m => m.D2CComponent) },
+      { path: 'courier-analysis', loadComponent: () => import('./features/dashboard/courier-analysis/courier-analysis.component').then(m => m.CourierAnalysisComponent) },
       { path: 'reports',     loadComponent: () => import('./features/dashboard/reports/reports.component').then(m => m.ReportsComponent) },
       { path: 'returns',     loadComponent: () => import('./features/dashboard/returns/returns.component').then(m => m.ReturnsComponent) },
     ],
