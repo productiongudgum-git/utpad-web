@@ -8,6 +8,22 @@ function fmtDate(d: Date): string {
 }
 
 /**
+ * Decode a batch code (e.g. "AI0626" = day 08, month 06, year 26 → 8 Jun 2026)
+ * back to a timestamp for sorting. Special codes (OPENING-STOCK, RESET-STOCK,
+ * anything not matching the format) return 0 so they land at the bottom of a
+ * newest-first sort.
+ */
+function batchCodeToTimestamp(code: string): number {
+  const match = /^([A-J])([A-J])(\d{2})(\d{2})$/.exec(code || '');
+  if (!match) return 0;
+  const day   = (match[1].charCodeAt(0) - 65) * 10 + (match[2].charCodeAt(0) - 65);
+  const month = parseInt(match[3], 10) - 1;
+  const year  = 2000 + parseInt(match[4], 10);
+  const d     = new Date(year, month, day);
+  return isNaN(d.getTime()) ? 0 : d.getTime();
+}
+
+/**
  * INVENTORY STOCK MODEL (all-time balance, not per-period)
  * ────────────────────────────────────────────────────────
  * Stock is a running balance across ALL history. The date pickers do NOT
@@ -654,8 +670,11 @@ export class InventoryComponent implements OnInit, OnDestroy {
         g.available += b.available;
         g.dispatchedInPeriod += b.dispatchedInPeriod;
       }
-      // Sort batches by code for stable display.
-      g.batches.sort((a, b) => a.batchCode.localeCompare(b.batchCode));
+      // Sort batches newest → oldest. Batch codes follow AXNNYY where the first
+      // two chars are day (digit→letter, 0=A…9=J), so we decode back to a Date
+      // to sort across month/year boundaries. Special codes (OPENING-STOCK,
+      // RESET-STOCK, etc.) fall to epoch and land at the bottom.
+      g.batches.sort((a, b) => batchCodeToTimestamp(b.batchCode) - batchCodeToTimestamp(a.batchCode));
       const invMap = reservedInvoiceMap.get(g.flavorId);
       g.reservedInvoices = invMap
         ? Array.from(invMap.values()).sort((a, b) => b.boxes_reserved - a.boxes_reserved)
