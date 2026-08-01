@@ -1,26 +1,19 @@
 import { Component, OnDestroy, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule, DecimalPipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { SupabaseService } from '../../../core/supabase.service';
+import { AuthService } from '../../../core/auth/auth.service';
+import {
+  planInventoryReset,
+  batchCodeToTimestamp,
+  ResetBatchInput,
+  ResetRowInput,
+  ResetPlan,
+} from './inventory-reset';
 
 function fmtDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-/**
- * Decode a batch code (e.g. "AI0626" = day 08, month 06, year 26 → 8 Jun 2026)
- * back to a timestamp for sorting. Special codes (OPENING-STOCK, RESET-STOCK,
- * anything not matching the format) return 0 so they land at the bottom of a
- * newest-first sort.
- */
-function batchCodeToTimestamp(code: string): number {
-  const match = /^([A-J])([A-J])(\d{2})(\d{2})$/.exec(code || '');
-  if (!match) return 0;
-  const day   = (match[1].charCodeAt(0) - 65) * 10 + (match[2].charCodeAt(0) - 65);
-  const month = parseInt(match[3], 10) - 1;
-  const year  = 2000 + parseInt(match[4], 10);
-  const d     = new Date(year, month, day);
-  return isNaN(d.getTime()) ? 0 : d.getTime();
 }
 
 /**
@@ -60,6 +53,10 @@ interface BatchDetail {
   reserved: number;             // committed, not yet shipped
   available: number;            // onHand − reserved
   dispatchedInPeriod: number;   // movement column — shipped within [from, to]
+  /** Earliest session_date in the batch — matches the ops-api FIFO grouping. */
+  sessionDate: string;
+  /** Underlying packing_sessions rows, so a reset can target real (batch, production_batch) pairs. */
+  rows: ResetRowInput[];
 }
 
 interface ReservedInvoice {
@@ -87,7 +84,7 @@ interface FlavorGroup {
 @Component({
   selector: 'app-inventory',
   standalone: true,
-  imports: [CommonModule, DecimalPipe],
+  imports: [CommonModule, DecimalPipe, FormsModule],
   template: `
     <div style="padding:24px;max-width:1100px;">
       <div style="margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
@@ -213,6 +210,14 @@ interface FlavorGroup {
                           <span style="color:#9CA3AF;">Dispatched {{ fromDate() }} → {{ toDate() }}: <strong style="color:#374151;">{{ fg.dispatchedInPeriod | number:'1.0-0' }}</strong></span>
                         </div>
 
+                        @if (isAdmin()) {
+                          <button (click)="openReset(fg, $event)"
+                                  style="margin-top:10px;padding:6px 12px;background:#fff;border:1px solid #E5E7EB;border-radius:8px;font-size:12px;font-weight:600;color:#b45309;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+                            <span class="material-icons-round" style="font-size:14px;">restart_alt</span>
+                            Reset stock
+                          </button>
+                        }
+
                         <p style="font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.5px;margin:14px 0 6px;">Batches</p>
                         <table style="width:100%;border-collapse:collapse;margin-top:4px;">
                           <thead>
@@ -315,13 +320,277 @@ interface FlavorGroup {
           <span style="color:#9CA3AF;">Dispatched in period: <strong style="color:#374151;">{{ grandDispatchedInPeriod() | number:'1.0-0' }}</strong></span>
         </div>
       }
+
+      <!-- ── Reset stock dialog (admin) ────────────────────────────────────── -->
+      @if (resetTarget(); as rt) {
+        <div style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px;"
+             (click)="closeReset()">
+          <div style="background:#fff;border-radius:14px;max-width:620px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:0 20px 40px rgba(0,0,0,0.2);"
+               (click)="$event.stopPropagation()">
+
+            <div style="padding:20px 22px 14px;border-bottom:1px solid #E5E7EB;">
+              <h2 style="font-family:'Cabin',sans-serif;font-size:18px;font-weight:700;color:#121212;margin:0 0 4px;">Reset stock — {{ rt.flavorName }}</h2>
+              <p style="color:#6B7280;font-size:13px;margin:0;">
+                Keeps the newest boxes and resets the rest, following the same FIFO order dispatch uses.
+              </p>
+            </div>
+
+            <div style="padding:18px 22px;">
+              <!-- Current state -->
+              <div style="display:flex;gap:18px;flex-wrap:wrap;background:#f8f9fa;border:1px solid #E5E7EB;border-radius:8px;padding:12px 14px;font-size:13px;color:#6B7280;">
+                <span>On-hand: <strong style="color:#374151;">{{ rt.onHand | number:'1.0-0' }}</strong></span>
+                <span>Reserved: <strong style="color:#b45309;">{{ rt.totalReserved | number:'1.0-0' }}</strong></span>
+                <span>Available: <strong style="color:#01AC51;">{{ rt.available | number:'1.0-0' }}</strong></span>
+              </div>
+
+              @if (rt.totalReserved > 0) {
+                <p style="font-size:12px;color:#6B7280;margin:10px 0 0;line-height:1.5;">
+                  <strong style="color:#b45309;">{{ rt.totalReserved | number:'1.0-0' }}</strong> boxes are reserved against open invoices.
+                  Reserved stock is excluded from Available, so a reset never touches it — on-hand will settle at your target plus {{ rt.totalReserved | number:'1.0-0' }}.
+                </p>
+              }
+
+              <!-- Target -->
+              <label style="display:block;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.4px;margin:18px 0 6px;">
+                Reset available to
+              </label>
+              <input type="number" min="0" step="1" [value]="resetInput()" (input)="onResetInput($event)"
+                     placeholder="e.g. 600" autofocus
+                     style="width:100%;padding:10px 12px;border:1px solid #E5E7EB;border-radius:8px;font-size:15px;color:#121212;outline:none;box-sizing:border-box;">
+
+              @if (resetPlan(); as plan) {
+                @if (!plan.ok) {
+                  <div style="margin-top:12px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 12px;font-size:13px;color:#991b1b;line-height:1.5;">
+                    {{ plan.error }}
+                  </div>
+                } @else {
+                  @for (w of plan.warnings; track w) {
+                    <div style="margin-top:12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;font-size:12px;color:#92400e;line-height:1.5;">
+                      {{ w }}
+                    </div>
+                  }
+
+                  <div style="margin-top:14px;display:flex;gap:16px;flex-wrap:wrap;font-size:13px;">
+                    <span style="color:#6B7280;">Keeping <strong style="color:#01AC51;">{{ plan.target | number:'1.0-0' }}</strong></span>
+                    <span style="color:#6B7280;">Resetting <strong style="color:#dc2626;">{{ plan.totalReset | number:'1.0-0' }}</strong></span>
+                  </div>
+
+                  <p style="font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.5px;margin:14px 0 6px;">Preview — newest first</p>
+                  <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                      <tr style="border-bottom:1px solid #E5E7EB;">
+                        <th style="text-align:left;padding:6px 10px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Batch</th>
+                        <th style="text-align:left;padding:6px 10px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Packed on</th>
+                        <th style="text-align:right;padding:6px 10px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Available</th>
+                        <th style="text-align:right;padding:6px 10px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Keep</th>
+                        <th style="text-align:right;padding:6px 10px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Reset</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (b of planRows(plan); track b.batchCode) {
+                        <tr style="border-bottom:1px solid #f3f4f6;"
+                            [style.background]="b.reset > 0 && b.keep === 0 ? '#fef2f2' : b.reset > 0 ? '#fffbeb' : 'transparent'">
+                          <td style="padding:7px 10px;font-size:12px;font-weight:600;color:#374151;font-family:monospace;">{{ b.batchCode }}</td>
+                          <td style="padding:7px 10px;font-size:12px;color:#9CA3AF;">{{ b.sessionDate || '—' }}</td>
+                          <td style="padding:7px 10px;text-align:right;font-size:12px;color:#374151;">{{ b.availableBefore | number:'1.0-0' }}</td>
+                          <td style="padding:7px 10px;text-align:right;font-size:12px;font-weight:600;color:#01AC51;">{{ b.keep | number:'1.0-0' }}</td>
+                          <td style="padding:7px 10px;text-align:right;font-size:12px;font-weight:600;"
+                              [style.color]="b.reset > 0 ? '#dc2626' : '#9CA3AF'">{{ b.reset | number:'1.0-0' }}</td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                }
+              }
+
+              @if (resetError()) {
+                <div style="margin-top:12px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 12px;font-size:13px;color:#991b1b;line-height:1.5;">
+                  {{ resetError() }}
+                </div>
+              }
+            </div>
+
+            <div style="padding:14px 22px 20px;border-top:1px solid #E5E7EB;display:flex;justify-content:flex-end;gap:10px;">
+              <button (click)="closeReset()" [disabled]="resetBusy()"
+                      style="padding:9px 16px;background:#fff;border:1px solid #E5E7EB;border-radius:8px;font-size:14px;font-weight:500;color:#374151;cursor:pointer;">
+                Cancel
+              </button>
+              <button (click)="confirmReset()"
+                      [disabled]="resetBusy() || !resetPlan()?.ok"
+                      [style.opacity]="(resetBusy() || !resetPlan()?.ok) ? '0.5' : '1'"
+                      [style.cursor]="(resetBusy() || !resetPlan()?.ok) ? 'not-allowed' : 'pointer'"
+                      style="padding:9px 16px;background:#dc2626;border:1px solid #dc2626;border-radius:8px;font-size:14px;font-weight:600;color:#fff;">
+                {{ resetBusy() ? 'Resetting…' : 'Reset stock' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      }
     </div>
   `,
 })
 export class InventoryComponent implements OnInit, OnDestroy {
   private readonly supabase = inject(SupabaseService);
+  private readonly auth = inject(AuthService);
   private channel: RealtimeChannel | null = null;
   private reloadDebounce: ReturnType<typeof setTimeout> | null = null;
+
+  // ── Stock reset (admin only) ─────────────────────────────────────────────
+  /** Only the admin role may correct stock. gg_users has exactly one admin. */
+  readonly isAdmin = computed(() => this.auth.currentUser()?.role === 'admin');
+
+  /**
+   * Flavour id whose reset dialog is open, or null when closed.
+   *
+   * The ID rather than the FlavorGroup itself: a realtime dispatch or packing
+   * event reloads the table and replaces every FlavorGroup object, so holding
+   * the object would leave the dialog planning against stock figures that have
+   * since moved. Re-deriving from flavors() keeps the preview live.
+   */
+  resetFlavorId = signal<string | null>(null);
+  readonly resetTarget = computed<FlavorGroup | null>(() => {
+    const id = this.resetFlavorId();
+    if (!id) return null;
+    return this.flavors().find(f => f.flavorId === id) ?? null;
+  });
+
+  /** Raw text of the target input — kept as a string so an empty box isn't 0. */
+  resetInput = signal('');
+  resetBusy = signal(false);
+  resetError = signal('');
+
+  /**
+   * Live plan for the open dialog. Recomputes on every keystroke — and on every
+   * realtime stock change — so the admin sees which batches survive before
+   * anything is written.
+   */
+  readonly resetPlan = computed<ResetPlan | null>(() => {
+    const fg = this.resetTarget();
+    if (!fg) return null;
+    const raw = this.resetInput().trim();
+    if (raw === '') return null;
+    const target = Number(raw);
+    return planInventoryReset(this.toResetBatches(fg), target);
+  });
+
+  private toResetBatches(fg: FlavorGroup): ResetBatchInput[] {
+    return fg.batches.map(b => ({
+      batchCode: b.batchCode,
+      sessionDate: b.sessionDate,
+      available: b.available,
+      reserved: b.reserved,
+      rows: b.rows,
+    }));
+  }
+
+  openReset(fg: FlavorGroup, event: Event): void {
+    event.stopPropagation();   // don't collapse the row behind the dialog
+    this.resetFlavorId.set(fg.flavorId);
+    this.resetInput.set('');
+    this.resetError.set('');
+  }
+
+  closeReset(): void {
+    if (this.resetBusy()) return;   // never abandon a half-written reset
+    this.resetFlavorId.set(null);
+    this.resetInput.set('');
+    this.resetError.set('');
+  }
+
+  onResetInput(event: Event): void {
+    this.resetInput.set((event.target as HTMLInputElement).value);
+    this.resetError.set('');
+  }
+
+  /** Batches shown in the preview: newest first, matching the plan's order. */
+  planRows(plan: ResetPlan) {
+    return plan.batches.filter(b => b.availableBefore !== 0 || b.reset !== 0);
+  }
+
+  /**
+   * Write the reset: negative adjustment rows first, then the audit row.
+   *
+   * The adjustments are inserted as one statement so a partial correction can't
+   * land. If the audit insert fails afterwards the stock figures are still
+   * correct — we surface that rather than rolling back, because silently
+   * undoing a stock correction the admin just confirmed is worse than an
+   * audit gap.
+   */
+  async confirmReset(): Promise<void> {
+    const fg = this.resetTarget();
+    const plan = this.resetPlan();
+    if (!fg || !plan || !plan.ok || this.resetBusy()) return;
+
+    // Re-check the arithmetic against the plan we are about to write.
+    const adjTotal = plan.adjustments.reduce((s, a) => s + a.boxes, 0);
+    if (adjTotal !== plan.totalReset) {
+      this.resetError.set('Safety check failed — nothing was written. Refresh and try again.');
+      return;
+    }
+
+    this.resetBusy.set(true);
+    this.resetError.set('');
+
+    try {
+      let insertedIds: string[] = [];
+
+      if (plan.adjustments.length > 0) {
+        const rows = plan.adjustments.map(a => ({
+          flavor_id: fg.flavorId,
+          batch_code: a.batchCode,
+          production_batch_id: a.productionBatchId,
+          // The offset row's own date, never today — dashboard-home sums
+          // packing_sessions where session_date = today for "packed today".
+          session_date: a.sessionDate || null,
+          boxes_packed: -a.boxes,
+          status: 'reset-adjustment',
+        }));
+
+        const { data, error } = await this.supabase.client
+          .from('packing_sessions')
+          .insert(rows)
+          .select('id');
+        if (error) throw new Error(error.message);
+        insertedIds = ((data ?? []) as Array<{ id: string }>).map(r => r.id);
+      }
+
+      const { error: auditError } = await this.supabase.client
+        .from('inventory_resets')
+        .insert({
+          flavor_id: fg.flavorId,
+          flavor_name: fg.flavorName,
+          previous_available: plan.currentAvailable,
+          target_available: plan.target,
+          boxes_reset: plan.totalReset,
+          batch_breakdown: plan.batches.map(b => ({
+            batch_code: b.batchCode,
+            session_date: b.sessionDate,
+            available_before: b.availableBefore,
+            keep: b.keep,
+            reset: b.reset,
+          })),
+          adjustment_session_ids: insertedIds,
+          created_by: this.auth.currentUser()?.username ?? '',
+        });
+
+      if (auditError) {
+        // Stock is already corrected — say so plainly instead of implying failure.
+        this.resetError.set(
+          `Stock was reset to ${plan.target}, but the audit record failed to save: ${auditError.message}`,
+        );
+        await this.loadData();
+        return;
+      }
+
+      this.resetFlavorId.set(null);
+      this.resetInput.set('');
+      await this.loadData();
+    } catch (err) {
+      this.resetError.set(err instanceof Error ? err.message : 'Reset failed.');
+    } finally {
+      this.resetBusy.set(false);
+    }
+  }
 
   // Pull a generous cap so large tables aren't silently truncated to the
   // PostgREST default (1000 rows), which would corrupt the stock totals.
@@ -466,9 +735,11 @@ export class InventoryComponent implements OnInit, OnDestroy {
 
     // ── Fetch everything ALL-TIME (stock is a running balance). The date range
     //    is applied only to the movement column, in code, after the fetch. ──
+    // id / session_date / production_batch_id are needed by the reset planner so
+    // adjustment rows can mirror the exact rows they offset.
     const sessionsP = this.supabase.client
       .from('packing_sessions')
-      .select('batch_code, boxes_packed, flavor_id')
+      .select('id, batch_code, boxes_packed, flavor_id, session_date, production_batch_id')
       .limit(this.ROW_CAP);
 
     const eventsP = this.supabase.client
@@ -531,6 +802,8 @@ export class InventoryComponent implements OnInit, OnDestroy {
     const reservedBatchMap = new Map<string, number>();  // reserved
     const returnedBatchMap = new Map<string, number>();  // returned
     const periodShipBatch  = new Map<string, number>();  // dispatched within [from,to]
+    const rowsBatchMap     = new Map<string, ResetRowInput[]>();  // underlying packing rows
+    const dateBatchMap     = new Map<string, string>();  // earliest session_date per batch
 
     // Per-flavor extras
     const reservedInvoiceMap = new Map<string, Map<string, ReservedInvoice>>();
@@ -548,8 +821,22 @@ export class InventoryComponent implements OnInit, OnDestroy {
       const bc = String(row.batch_code ?? '—');
       const boxes = Number(row.boxes_packed) || 0;
       if (boxes === 0) continue;
-      packedBatchMap.set(key(fid, bc), (packedBatchMap.get(key(fid, bc)) ?? 0) + boxes);
+      const k = key(fid, bc);
+      packedBatchMap.set(k, (packedBatchMap.get(k) ?? 0) + boxes);
       flavorIds.add(fid);
+
+      // Keep the raw rows (and the batch's earliest date) for the reset planner.
+      const sessionDate = String(row.session_date ?? '');
+      const list = rowsBatchMap.get(k) ?? [];
+      list.push({
+        id: String(row.id),
+        sessionDate,
+        productionBatchId: row.production_batch_id != null ? String(row.production_batch_id) : null,
+        boxesPacked: boxes,
+      });
+      rowsBatchMap.set(k, list);
+      const earliest = dateBatchMap.get(k);
+      if (sessionDate && (!earliest || sessionDate < earliest)) dateBatchMap.set(k, sessionDate);
     }
 
     // 2. Dispatch events → shipped or reserved (classified by event OR invoice flag)
@@ -656,6 +943,8 @@ export class InventoryComponent implements OnInit, OnDestroy {
         batchCode: bc,
         packed, shipped, returned, onHand, reserved, available,
         dispatchedInPeriod,
+        sessionDate: dateBatchMap.get(k) ?? '',
+        rows: rowsBatchMap.get(k) ?? [],
       });
     }
 
