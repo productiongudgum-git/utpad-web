@@ -125,6 +125,45 @@ interface ParentGroup {
               </div>
             </div>
 
+            <!-- Packing materials. Creation only: an existing variant's
+                 materials are edited on the Ingredients page, where all the
+                 other packing materials live. -->
+            @if (!editId()) {
+              <div style="border-top:1px solid #E5E7EB;margin:20px 0 16px;padding-top:16px;">
+                <h3 style="font-family:'Cabin',sans-serif;font-size:14px;font-weight:600;margin:0 0 4px;color:#121212;">
+                  Packing materials <span style="font-weight:400;color:#9CA3AF;">(optional)</span>
+                </h3>
+                <p style="font-size:12px;color:#6B7280;margin:0 0 14px;line-height:1.5;">
+                  A pouch sized for {{ form.getRawValue().units_per_box }} gums is a different item from
+                  the parent's, so give it its own name and its stock will be tracked separately.
+                  Anything you leave blank falls back to the shared material for that role.
+                  Both are created empty — record what you actually have through Inwarding.
+                </p>
+
+                <div style="display:grid;grid-template-columns:1fr 140px;gap:16px;margin-bottom:12px;" class="pv-grid">
+                  <div>
+                    <label class="pv-label">Monocarton name</label>
+                    <input formControlName="monocarton_name" class="gg-input" placeholder="e.g. Lemon 10s Monocarton">
+                  </div>
+                  <div>
+                    <label class="pv-label">Per box</label>
+                    <input formControlName="monocarton_qty_per_box" type="number" min="0" step="1" class="gg-input">
+                  </div>
+                </div>
+
+                <div style="display:grid;grid-template-columns:1fr 140px;gap:16px;" class="pv-grid">
+                  <div>
+                    <label class="pv-label">Ziplock name</label>
+                    <input formControlName="ziplock_name" class="gg-input" placeholder="e.g. Lemon 10s Ziplock">
+                  </div>
+                  <div>
+                    <label class="pv-label">Per box</label>
+                    <input formControlName="ziplock_qty_per_box" type="number" min="0" step="1" class="gg-input">
+                  </div>
+                </div>
+              </div>
+            }
+
             @if (formError()) { <p style="color:#FF2828;font-size:13px;margin-bottom:12px;">{{ formError() }}</p> }
 
             <div style="display:flex;gap:10px;">
@@ -249,6 +288,13 @@ export class PackingVariantsComponent implements OnInit {
     code:                ['', Validators.required],
     units_per_box:       [10, [Validators.required, Validators.min(1)]],
     default_customer_id: [''],
+    // Packing materials — optional, and only offered when creating. Leaving a
+    // name blank simply means the variant falls back to the generic material
+    // for that role, exactly as a base flavour does.
+    monocarton_name:        [''],
+    monocarton_qty_per_box: [1, Validators.min(0)],
+    ziplock_name:           [''],
+    ziplock_qty_per_box:    [1, Validators.min(0)],
   });
 
   async ngOnInit(): Promise<void> { await this.loadData(); }
@@ -264,16 +310,28 @@ export class PackingVariantsComponent implements OnInit {
     const parent = this.baseFlavors().find(f => f.id === this.form.getRawValue().parent_flavor_id);
     if (!parent) return;
     const units = this.form.getRawValue().units_per_box;
-    if (!this.form.getRawValue().name) this.form.patchValue({ name: `${parent.name} ${units}s` });
+    const variantName = `${parent.name} ${units}s`;
+    if (!this.form.getRawValue().name) this.form.patchValue({ name: variantName });
     if (!this.form.getRawValue().code) {
       this.form.patchValue({ code: `${parent.code}-${units}` });
+    }
+    // Suggest material names too, so the common case is one click. Both stay
+    // editable, and clearing one means that role falls back to the generic.
+    if (!this.form.getRawValue().monocarton_name) {
+      this.form.patchValue({ monocarton_name: `${variantName} Monocarton` });
+    }
+    if (!this.form.getRawValue().ziplock_name) {
+      this.form.patchValue({ ziplock_name: `${variantName} Ziplock` });
     }
   }
 
   startEdit(v: Variant): void {
     this.editId.set(v.id);
     this.formError.set('');
-    this.form.setValue({
+    // Reset first so the material fields are cleared — they are creation-only
+    // and must never carry over into an edit and create duplicates.
+    this.resetForm();
+    this.form.patchValue({
       parent_flavor_id:    v.parent_flavor_id,
       name:                v.name,
       code:                v.code,
@@ -320,20 +378,92 @@ export class PackingVariantsComponent implements OnInit {
       default_customer_id: v.default_customer_id || null,
     };
 
-    const { error } = this.editId()
-      ? await this.supabase.client.from('gg_flavors').update(row).eq('id', this.editId()!)
-      : await this.supabase.client.from('gg_flavors').insert({ ...row, active: true });
+    if (this.editId()) {
+      const { error } = await this.supabase.client
+        .from('gg_flavors').update(row).eq('id', this.editId()!);
+      if (error) { this.formError.set(error.message); this.saving.set(false); return; }
+      this.showToast('Variant updated', 'success');
+    } else {
+      const { data, error } = await this.supabase.client
+        .from('gg_flavors').insert({ ...row, active: true }).select('id').single();
+      if (error || !data) {
+        this.formError.set(error?.message ?? 'Failed to create variant.');
+        this.saving.set(false);
+        return;
+      }
 
-    if (error) {
-      this.formError.set(error.message);
-      this.saving.set(false);
-      return;
+      // Materials are best-effort. The variant itself is created and correct;
+      // if a material insert fails we say so rather than rolling the variant
+      // back, because a variant with no materials still works (it falls back to
+      // the generic ones) whereas an unexplained disappearance would not.
+      const materialError = await this.createPackingMaterials(data.id as string, v);
+      if (materialError) {
+        this.formError.set(
+          `Variant created, but its packing materials could not be added: ${materialError}. `
+          + `Add them on the Ingredients page.`,
+        );
+        this.saving.set(false);
+        await this.loadData();
+        return;
+      }
+      this.showToast('Variant created', 'success');
     }
 
-    this.showToast(this.editId() ? 'Variant updated' : 'Variant created', 'success');
     this.cancelEdit();
     await this.loadData();
     this.saving.set(false);
+  }
+
+  /**
+   * Create the variant's own monocarton and ziplock, if named.
+   *
+   * Each becomes a gg_ingredients row tagged to this variant, plus an
+   * inventory_raw_materials row at zero — stock enters through Inwarding, the
+   * same rule that governs boxes. Quantities are in `pcs`, the canonical count
+   * unit every other consumer reads.
+   *
+   * Tagging them to the variant is what makes ops-api migration 0011 skip the
+   * generic material of the same role for this flavour, so one box consumes one
+   * pouch rather than two.
+   *
+   * Returns an error message, or null on success.
+   */
+  private async createPackingMaterials(
+    flavorId: string,
+    v: ReturnType<typeof this.form.getRawValue>,
+  ): Promise<string | null> {
+    const wanted = [
+      { role: 'monocarton', name: v.monocarton_name.trim(), qty: Number(v.monocarton_qty_per_box) },
+      { role: 'ziplock',    name: v.ziplock_name.trim(),    qty: Number(v.ziplock_qty_per_box) },
+    ].filter(m => m.name !== '');
+
+    if (wanted.length === 0) return null;
+
+    const { data, error } = await this.supabase.client
+      .from('gg_ingredients')
+      .insert(wanted.map(m => ({
+        name: m.name,
+        default_unit: 'pcs',
+        active: true,
+        packing_role: m.role,
+        packing_flavor_id: flavorId,
+        qty_per_box: Number.isFinite(m.qty) && m.qty >= 0 ? m.qty : 1,
+      })))
+      .select('id');
+
+    if (error) return error.message;
+
+    const ids = ((data ?? []) as Array<{ id: string }>).map(r => r.id);
+    if (ids.length === 0) return null;
+
+    const { error: invError } = await this.supabase.client
+      .from('inventory_raw_materials')
+      .upsert(
+        ids.map(id => ({ ingredient_id: id, current_qty: 0, unit: 'pcs' })),
+        { onConflict: 'ingredient_id' },
+      );
+
+    return invError ? invError.message : null;
   }
 
   async toggleActive(v: Variant): Promise<void> {
@@ -387,6 +517,8 @@ export class PackingVariantsComponent implements OnInit {
   private resetForm(): void {
     this.form.reset({
       parent_flavor_id: '', name: '', code: '', units_per_box: 10, default_customer_id: '',
+      monocarton_name: '', monocarton_qty_per_box: 1,
+      ziplock_name: '', ziplock_qty_per_box: 1,
     });
     this.formError.set('');
   }
