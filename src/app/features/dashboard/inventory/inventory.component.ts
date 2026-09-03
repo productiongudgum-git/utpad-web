@@ -350,13 +350,44 @@ interface FlavorGroup {
                 </p>
               }
 
-              <!-- Target -->
-              <label style="display:block;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.4px;margin:18px 0 6px;">
-                Reset available to
+              <!-- Mode: type what to remove, or what should be left -->
+              <div style="display:flex;gap:0;margin:18px 0 8px;border:1px solid #E5E7EB;border-radius:8px;overflow:hidden;width:fit-content;">
+                @for (m of resetModes; track m.key) {
+                  <button type="button" (click)="setResetMode(m.key)"
+                          [style.background]="resetMode() === m.key ? '#01AC51' : '#fff'"
+                          [style.color]="resetMode() === m.key ? '#fff' : '#6B7280'"
+                          style="padding:7px 16px;border:none;font-size:13px;font-weight:600;cursor:pointer;">
+                    {{ m.label }}
+                  </button>
+                }
+              </div>
+
+              <label style="display:block;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.4px;margin:0 0 6px;">
+                {{ resetMode() === 'remove' ? 'Boxes to remove' : 'Boxes that should be left' }}
               </label>
               <input type="number" min="0" step="1" [value]="resetInput()" (input)="onResetInput($event)"
-                     placeholder="e.g. 600" autofocus
+                     [placeholder]="resetMode() === 'remove' ? 'e.g. 50' : 'e.g. 600'" autofocus
                      style="width:100%;padding:10px 12px;border:1px solid #E5E7EB;border-radius:8px;font-size:15px;color:#121212;outline:none;box-sizing:border-box;">
+
+              <!-- Live outcome, so the mode can never mislead -->
+              @if (resetPlan(); as plan) {
+                @if (plan.ok) {
+                  <p style="margin:10px 0 0;font-size:13px;color:#374151;">
+                    Available <strong style="font-family:monospace;">{{ plan.currentAvailable | number:'1.0-0' }}</strong>
+                    &rarr; <strong style="font-family:monospace;color:#01AC51;">{{ plan.target | number:'1.0-0' }}</strong>
+                    <span style="color:#6B7280;">
+                      &nbsp;·&nbsp;
+                      @if (plan.target > plan.currentAvailable) {
+                        adds {{ plan.target - plan.currentAvailable | number:'1.0-0' }} boxes
+                      } @else if (plan.target < plan.currentAvailable) {
+                        removes {{ plan.currentAvailable - plan.target | number:'1.0-0' }} boxes
+                      } @else {
+                        no change
+                      }
+                    </span>
+                  </p>
+                }
+              }
 
               @if (resetPlan(); as plan) {
                 @if (!plan.ok) {
@@ -372,8 +403,20 @@ interface FlavorGroup {
 
                   <div style="margin-top:14px;display:flex;gap:16px;flex-wrap:wrap;font-size:13px;">
                     <span style="color:#6B7280;">Keeping <strong style="color:#01AC51;">{{ plan.target | number:'1.0-0' }}</strong></span>
-                    <span style="color:#6B7280;">Resetting <strong style="color:#dc2626;">{{ plan.totalReset | number:'1.0-0' }}</strong></span>
+                    @if (plan.totalReset > 0) {
+                      <span style="color:#6B7280;">Removing <strong style="color:#dc2626;">{{ plan.totalReset | number:'1.0-0' }}</strong></span>
+                    }
+                    @if (plan.totalAdded > 0) {
+                      <span style="color:#6B7280;">Adding back <strong style="color:#01AC51;">{{ plan.totalAdded | number:'1.0-0' }}</strong></span>
+                    }
                   </div>
+                  @if (plan.topUp > 0) {
+                    <p style="margin:10px 0 0;font-size:12px;color:#6B7280;line-height:1.5;">
+                      {{ plan.topUp | number:'1.0-0' }} boxes have no batch behind them, so they are
+                      recorded against a <strong style="font-family:monospace;color:#374151;">RESET-STOCK</strong>
+                      batch and will be dispatched first.
+                    </p>
+                  }
 
                   <p style="font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.5px;margin:14px 0 6px;">Preview — newest first</p>
                   <table style="width:100%;border-collapse:collapse;">
@@ -383,19 +426,25 @@ interface FlavorGroup {
                         <th style="text-align:left;padding:6px 10px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Packed on</th>
                         <th style="text-align:right;padding:6px 10px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Available</th>
                         <th style="text-align:right;padding:6px 10px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Keep</th>
-                        <th style="text-align:right;padding:6px 10px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Reset</th>
+                        <th style="text-align:right;padding:6px 10px;font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">Change</th>
                       </tr>
                     </thead>
                     <tbody>
                       @for (b of planRows(plan); track b.batchCode) {
                         <tr style="border-bottom:1px solid #f3f4f6;"
-                            [style.background]="b.reset > 0 && b.keep === 0 ? '#fef2f2' : b.reset > 0 ? '#fffbeb' : 'transparent'">
+                            [style.background]="b.added > 0 ? '#f0fdf4' : b.reset > 0 && b.keep === 0 ? '#fef2f2' : b.reset > 0 ? '#fffbeb' : 'transparent'">
                           <td style="padding:7px 10px;font-size:12px;font-weight:600;color:#374151;font-family:monospace;">{{ b.batchCode }}</td>
                           <td style="padding:7px 10px;font-size:12px;color:#9CA3AF;">{{ b.sessionDate || '—' }}</td>
                           <td style="padding:7px 10px;text-align:right;font-size:12px;color:#374151;">{{ b.availableBefore | number:'1.0-0' }}</td>
                           <td style="padding:7px 10px;text-align:right;font-size:12px;font-weight:600;color:#01AC51;">{{ b.keep | number:'1.0-0' }}</td>
                           <td style="padding:7px 10px;text-align:right;font-size:12px;font-weight:600;"
-                              [style.color]="b.reset > 0 ? '#dc2626' : '#9CA3AF'">{{ b.reset | number:'1.0-0' }}</td>
+                              [style.color]="b.reset > 0 ? '#dc2626' : b.added > 0 ? '#01AC51' : '#9CA3AF'">
+                            @if (b.added > 0) {
+                              +{{ b.added | number:'1.0-0' }}
+                            } @else if (b.reset > 0) {
+                              −{{ b.reset | number:'1.0-0' }}
+                            } @else { 0 }
+                          </td>
                         </tr>
                       }
                     </tbody>
@@ -454,10 +503,30 @@ export class InventoryComponent implements OnInit, OnDestroy {
     return this.flavors().find(f => f.flavorId === id) ?? null;
   });
 
-  /** Raw text of the target input — kept as a string so an empty box isn't 0. */
+  /** Raw text of the input — kept as a string so an empty box isn't 0. */
   resetInput = signal('');
   resetBusy = signal(false);
   resetError = signal('');
+
+  /**
+   * Whether the typed number means "take this many off" or "leave this many".
+   *
+   * Defaults to `remove` because that is how people describe a stock
+   * correction out loud, and typing a shortfall into a field that wanted a
+   * target was the single confusion this dialog kept causing. The live
+   * outcome line underneath shows both numbers either way, so the mode can
+   * never silently mislead.
+   */
+  resetMode = signal<'remove' | 'set'>('remove');
+  readonly resetModes = [
+    { key: 'remove' as const, label: 'Remove' },
+    { key: 'set' as const,    label: 'Set to' },
+  ];
+
+  setResetMode(mode: 'remove' | 'set'): void {
+    this.resetMode.set(mode);
+    this.resetError.set('');
+  }
 
   /**
    * Live plan for the open dialog. Recomputes on every keystroke — and on every
@@ -469,7 +538,12 @@ export class InventoryComponent implements OnInit, OnDestroy {
     if (!fg) return null;
     const raw = this.resetInput().trim();
     if (raw === '') return null;
-    const target = Number(raw);
+    const typed = Number(raw);
+    if (!Number.isFinite(typed)) return planInventoryReset(this.toResetBatches(fg), NaN);
+
+    // "Remove 50" from -60 would mean -110, which is never what anyone means.
+    // The planner refuses negative targets and says so.
+    const target = this.resetMode() === 'remove' ? fg.available - typed : typed;
     return planInventoryReset(this.toResetBatches(fg), target);
   });
 
@@ -488,6 +562,9 @@ export class InventoryComponent implements OnInit, OnDestroy {
     this.resetFlavorId.set(fg.flavorId);
     this.resetInput.set('');
     this.resetError.set('');
+    // A flavour in the negative is being repaired, not trimmed — start on the
+    // mode that actually applies so the first number typed makes sense.
+    this.resetMode.set(fg.available < 0 ? 'set' : 'remove');
   }
 
   closeReset(): void {
@@ -521,9 +598,11 @@ export class InventoryComponent implements OnInit, OnDestroy {
     const plan = this.resetPlan();
     if (!fg || !plan || !plan.ok || this.resetBusy()) return;
 
-    // Re-check the arithmetic against the plan we are about to write.
-    const adjTotal = plan.adjustments.reduce((s, a) => s + a.boxes, 0);
-    if (adjTotal !== plan.totalReset) {
+    // Re-check the arithmetic against the plan we are about to write: the
+    // signed adjustments must move the flavour exactly from where it is now to
+    // the target, in either direction.
+    const netChange = plan.adjustments.reduce((s, a) => s + a.boxes, 0);
+    if (netChange !== plan.target - plan.currentAvailable) {
       this.resetError.set('Safety check failed — nothing was written. Refresh and try again.');
       return;
     }
@@ -542,7 +621,10 @@ export class InventoryComponent implements OnInit, OnDestroy {
           // The offset row's own date, never today — dashboard-home sums
           // packing_sessions where session_date = today for "packed today".
           session_date: a.sessionDate || null,
-          boxes_packed: -a.boxes,
+          // Already signed by the planner: negative removes, positive adds.
+          boxes_packed: a.boxes,
+          // ops-api migration 0009 makes the packing-materials trigger skip
+          // this status, so a box recount never moves monocartons or ziplocks.
           status: 'reset-adjustment',
         }));
 
@@ -561,13 +643,16 @@ export class InventoryComponent implements OnInit, OnDestroy {
           flavor_name: fg.flavorName,
           previous_available: plan.currentAvailable,
           target_available: plan.target,
-          boxes_reset: plan.totalReset,
+          // Signed net movement, so the audit row records direction as well as
+          // size: negative took stock off, positive put it back.
+          boxes_reset: plan.target - plan.currentAvailable,
           batch_breakdown: plan.batches.map(b => ({
             batch_code: b.batchCode,
             session_date: b.sessionDate,
             available_before: b.availableBefore,
             keep: b.keep,
             reset: b.reset,
+            added: b.added,
           })),
           adjustment_session_ids: insertedIds,
           created_by: this.auth.currentUser()?.username ?? '',

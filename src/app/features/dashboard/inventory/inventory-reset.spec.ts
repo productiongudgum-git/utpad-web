@@ -1,6 +1,7 @@
 import {
   planInventoryReset,
   batchCodeToTimestamp,
+  RESET_BATCH_CODE,
   ResetBatchInput,
   ResetRowInput,
 } from './inventory-reset';
@@ -76,8 +77,10 @@ describe('planInventoryReset — the worked example', () => {
 
   it('emits adjustments that sum to exactly the reset amount', () => {
     const plan = planInventoryReset(batches, 600);
+    // Adjustments are signed — removals are negative boxes_packed rows.
     const total = plan.adjustments.reduce((s, a) => s + a.boxes, 0);
-    expect(total).toBe(400);
+    expect(total).toBe(-400);
+    expect(plan.adjustments.every(a => a.boxes < 0)).toBe(true);
   });
 
   it('never dates an adjustment to today', () => {
@@ -135,7 +138,7 @@ describe('planInventoryReset — boundaries', () => {
     expect(plan.ok).toBe(true);
     expect(plan.totalReset).toBe(380);
     expect(plan.adjustments.length).toBe(1);
-    expect(plan.adjustments[0].boxes).toBe(380);
+    expect(plan.adjustments[0].boxes).toBe(-380);
   });
 
   it('handles a flavour with no stock at all', () => {
@@ -148,12 +151,6 @@ describe('planInventoryReset — boundaries', () => {
 describe('planInventoryReset — refusals', () => {
   const batches = [batch('AA0726', '2026-07-01', 500)];
 
-  it('refuses to increase stock', () => {
-    const plan = planInventoryReset(batches, 900);
-    expect(plan.ok).toBe(false);
-    expect(plan.error).toContain('can only reduce');
-  });
-
   it('refuses a negative target', () => {
     expect(planInventoryReset(batches, -1).ok).toBe(false);
   });
@@ -164,16 +161,102 @@ describe('planInventoryReset — refusals', () => {
     expect(plan.error).toContain('whole number');
   });
 
-  it('refuses when the flavour is already oversold', () => {
-    const plan = planInventoryReset([batch('AA0726', '2026-07-01', -40)], 0);
-    expect(plan.ok).toBe(false);
-    expect(plan.error).toContain('oversold');
-  });
-
   it('writes nothing when it refuses', () => {
-    const plan = planInventoryReset(batches, 900);
+    const plan = planInventoryReset(batches, 12.5);
     expect(plan.adjustments).toEqual([]);
     expect(plan.totalReset).toBe(0);
+    expect(plan.totalAdded).toBe(0);
+  });
+});
+
+describe('planInventoryReset — increasing stock', () => {
+  it('tops up above the current figure via a RESET-STOCK batch', () => {
+    const plan = planInventoryReset([batch('AA0726', '2026-07-01', 500)], 900);
+
+    expect(plan.ok).toBe(true);
+    expect(plan.topUp).toBe(400);
+    expect(plan.totalReset).toBe(0);
+
+    const topUp = plan.adjustments.filter(a => a.batchCode === RESET_BATCH_CODE);
+    expect(topUp.length).toBe(1);
+    expect(topUp[0].boxes).toBe(400);
+    // Invented boxes trace to no production batch, and we say so.
+    expect(topUp[0].productionBatchId).toBeNull();
+  });
+
+  it('nets to exactly the difference between current and target', () => {
+    const plan = planInventoryReset([batch('AA0726', '2026-07-01', 500)], 900);
+    const net = plan.adjustments.reduce((s, a) => s + a.boxes, 0);
+    expect(net).toBe(400);
+  });
+
+  it('dates the top-up to the flavour’s earliest row, never today', () => {
+    const plan = planInventoryReset(
+      [batch('AA0726', '2026-07-01', 100), batch('AB0726', '2026-07-09', 100)],
+      500,
+    );
+    const topUp = plan.adjustments.find(a => a.batchCode === RESET_BATCH_CODE)!;
+    expect(topUp.sessionDate).toBe('2026-07-01');
+    expect(topUp.sessionDate).not.toBe(new Date().toISOString().slice(0, 10));
+  });
+});
+
+describe('planInventoryReset — repairing a negative balance', () => {
+  it('brings a negative flavour up to the target', () => {
+    // The reported case: Lemon sits at -60 and should end up at 60.
+    const plan = planInventoryReset([batch('AA0726', '2026-07-01', -60)], 60);
+
+    expect(plan.ok).toBe(true);
+    expect(plan.currentAvailable).toBe(-60);
+
+    // Net movement is the full 120: +60 to clear the hole, +60 on top.
+    const net = plan.adjustments.reduce((s, a) => s + a.boxes, 0);
+    expect(net).toBe(120);
+  });
+
+  it('zeroes the bad batch and puts the target on RESET-STOCK', () => {
+    const plan = planInventoryReset([batch('AA0726', '2026-07-01', -60)], 60);
+
+    const repair = plan.adjustments.find(a => a.batchCode === 'AA0726')!;
+    expect(repair.boxes).toBe(60);           // -60 → 0
+
+    const topUp = plan.adjustments.find(a => a.batchCode === RESET_BATCH_CODE)!;
+    expect(topUp.boxes).toBe(60);            // 0 → 60
+
+    // Nothing is left showing a negative.
+    const bad = plan.batches.find(b => b.batchCode === 'AA0726')!;
+    expect(bad.keep + bad.added - bad.reset).toBe(60);
+  });
+
+  it('repairs a negative batch while trimming a positive one', () => {
+    // -60 and +200 net to 140; target 60 means repair, then trim 140.
+    const plan = planInventoryReset(
+      [batch('AA0726', '2026-07-01', -60), batch('AB0726', '2026-07-02', 200)],
+      60,
+    );
+
+    expect(plan.ok).toBe(true);
+    expect(plan.currentAvailable).toBe(140);
+
+    const net = plan.adjustments.reduce((s, a) => s + a.boxes, 0);
+    expect(net).toBe(60 - 140);
+    expect(plan.topUp).toBe(0);
+  });
+
+  it('repairs a flavour that is negative purely through reservations', () => {
+    // Nothing ever packed, 60 promised to an invoice → available -60.
+    const empty: ResetBatchInput = {
+      batchCode: 'AA0726',
+      sessionDate: '2026-07-01',
+      available: -60,
+      reserved: 60,
+      rows: [],
+    };
+    const plan = planInventoryReset([empty], 0);
+
+    expect(plan.ok).toBe(true);
+    const net = plan.adjustments.reduce((s, a) => s + a.boxes, 0);
+    expect(net).toBe(60);
   });
 });
 
@@ -251,8 +334,8 @@ describe('planInventoryReset — multi-row batches', () => {
 
     // Newest row absorbs first: 300 from pb-new, then 100 from pb-old.
     expect(plan.adjustments).toEqual([
-      { batchCode: 'AA0726', productionBatchId: 'pb-new', sessionDate: '2026-07-03', boxes: 300 },
-      { batchCode: 'AA0726', productionBatchId: 'pb-old', sessionDate: '2026-07-01', boxes: 100 },
+      { batchCode: 'AA0726', productionBatchId: 'pb-new', sessionDate: '2026-07-03', boxes: -300 },
+      { batchCode: 'AA0726', productionBatchId: 'pb-old', sessionDate: '2026-07-01', boxes: -100 },
     ]);
   });
 
@@ -271,7 +354,7 @@ describe('planInventoryReset — multi-row batches', () => {
     const plan = planInventoryReset(batches, 0);
     expect(plan.totalReset).toBe(100);
     expect(plan.adjustments.length).toBe(1);
-    expect(plan.adjustments[0].boxes).toBe(100);
+    expect(plan.adjustments[0].boxes).toBe(-100);
   });
 
   it('still balances when returns push available above packed', () => {
@@ -286,30 +369,40 @@ describe('planInventoryReset — multi-row batches', () => {
 
     const plan = planInventoryReset(batches, 0);
     expect(plan.ok).toBe(true);
-    expect(plan.adjustments.reduce((s, a) => s + a.boxes, 0)).toBe(80);
+    expect(plan.adjustments.reduce((s, a) => s + a.boxes, 0)).toBe(-80);
   });
 });
 
-describe('planInventoryReset — negative-balance batches', () => {
+describe('planInventoryReset — negative batches alongside healthy ones', () => {
   const batches = [
     batch('AC0726', '2026-07-03', 300),
     batch('AA0726', '2026-07-01', -50),
   ];
 
-  it('warns about them and leaves them untouched', () => {
+  it('repairs the negative batch back to zero and says so', () => {
     const plan = planInventoryReset(batches, 100);
     expect(plan.ok).toBe(true);
     expect(plan.warnings.length).toBe(1);
     expect(plan.warnings[0]).toContain('AA0726');
 
+    const repair = plan.adjustments.find(a => a.batchCode === 'AA0726')!;
+    expect(repair.boxes).toBe(50);
+
     const negative = plan.batches.find(b => b.batchCode === 'AA0726')!;
+    expect(negative.added).toBe(50);
     expect(negative.reset).toBe(0);
-    expect(negative.keep).toBe(0);
   });
 
-  it('excludes them from the retention arithmetic', () => {
+  it('trims the healthy batch to hit the target', () => {
     const plan = planInventoryReset(batches, 100);
-    // Only the healthy 300 participates: 300 − 100 kept = 200 reset.
+    // Only the healthy 300 participates in retention: keep 100, reset 200.
     expect(plan.totalReset).toBe(200);
+    expect(plan.totalAdded).toBe(50);
+  });
+
+  it('lands the flavour exactly on the target overall', () => {
+    const plan = planInventoryReset(batches, 100);
+    const net = plan.adjustments.reduce((s, a) => s + a.boxes, 0);
+    expect(plan.currentAvailable + net).toBe(100);
   });
 });

@@ -1,32 +1,61 @@
 /**
- * INVENTORY RESET — FIFO retention planner (pure, no I/O)
- * ───────────────────────────────────────────────────────
- * An admin corrects a flavour's sellable stock down to a target box count.
- * Because stock is consumed oldest-first (FIFO), the boxes that should survive
- * a correction are the NEWEST ones — so we walk batches newest → oldest,
- * keeping until the target is met, and reset everything older.
+ * INVENTORY RESET — stock correction planner (pure, no I/O)
+ * ─────────────────────────────────────────────────────────
+ * An admin corrects a flavour's sellable stock to a target box count. The
+ * target can be below OR above the current figure, and the current figure may
+ * itself be negative.
  *
- *   Charcoal: batch1 200 (oldest), batch2 600, batch3 200 (newest) → target 600
- *     batch3  200  keep 200  (running 200)
- *     batch2  600  keep 400  (running 600)  ← trimmed
- *     batch1  200  keep   0                 ← fully reset
- *   Total reset = 400.
+ * The plan is built in three passes:
+ *
+ *   1. REPAIR — any batch sitting below zero is brought back to exactly 0 with
+ *      a positive row against that batch. A negative balance means boxes were
+ *      dispatched that were never recorded as packed, so the correction belongs
+ *      on the batch where the mis-recording happened.
+ *
+ *   2. Everything is now ≥ 0. Compare that total to the target.
+ *
+ *   3a. TRIM (target below current) — stock is consumed oldest-first, so the
+ *       boxes that should survive are the NEWEST. Walk batches newest → oldest,
+ *       keep until the target is met, reset the rest.
+ *
+ *         Charcoal: batch1 200 (oldest), batch2 600, batch3 200 (newest) → 600
+ *           batch3  200  keep 200  (running 200)
+ *           batch2  600  keep 400  (running 600)  ← trimmed
+ *           batch1  200  keep   0                 ← fully reset
+ *
+ *   3b. TOP UP (target above current) — one positive row on the synthetic
+ *       RESET_BATCH_CODE with no production batch behind it. We genuinely do
+ *       not know which batch these boxes came from, so attributing them to a
+ *       real one would invent traceability that does not exist.
  *
  * The target is measured in AVAILABLE boxes (onHand − reserved), the same
  * number the Inventory screen shows. Because reserved boxes are excluded from
  * available, a reset can never eat into stock already committed to an open
  * invoice — reservations stay fully backed at `target + reserved` on hand.
  *
- * The plan is emitted as negative `boxes_packed` adjustment rows carrying the
- * SAME batch_code and production_batch_id as the rows they offset, so every
- * consumer that sums packing_sessions (8 web screens, the ops-api FIFO, and
- * the Android app) nets out correctly with no change to any of them.
+ * Adjustments are emitted as `boxes_packed` rows — negative to remove, positive
+ * to add — carrying the batch_code and production_batch_id of the rows they
+ * offset, so every consumer that sums packing_sessions (8 web screens, the
+ * ops-api FIFO, and the Android app) nets out correctly with no change to any
+ * of them.
  *
  * Each adjustment inherits the session_date of the row it offsets — never
  * today's date. dashboard-home computes "packed today" with a
- * `session_date = today` filter, and a negative row dated today would corrupt
+ * `session_date = today` filter, and an adjustment dated today would corrupt
  * that day's production figure.
+ *
+ * The caller writes these rows with `status = 'reset-adjustment'`, which
+ * ops-api migration 0009 makes the packing-materials trigger ignore. A box
+ * recount must not move monocarton or ziplock stock.
  */
+
+/**
+ * Batch code for boxes added by a correction. Deliberately not a real code:
+ * batchCodeToTimestamp sinks it to the epoch, so it sorts and dispatches as
+ * the OLDEST stock — corrected boxes of unknown age leave first rather than
+ * ageing on a shelf. Mirrors how OPENING-STOCK behaves.
+ */
+export const RESET_BATCH_CODE = 'RESET-STOCK';
 
 /** One underlying packing_sessions row inside a batch. */
 export interface ResetRowInput {
@@ -47,7 +76,12 @@ export interface ResetBatchInput {
   rows: ResetRowInput[];
 }
 
-/** A negative packing_sessions row to insert. `boxes` is a positive magnitude. */
+/**
+ * A packing_sessions row to insert.
+ *
+ * `boxes` is SIGNED: negative removes stock, positive adds it. The caller
+ * writes it straight into boxes_packed, so the sign is the instruction.
+ */
 export interface ResetAdjustment {
   batchCode: string;
   productionBatchId: string | null;
@@ -60,7 +94,10 @@ export interface ResetBatchPlan {
   sessionDate: string;
   availableBefore: number;
   keep: number;
+  /** Boxes taken off this batch. Never negative — additions are `added`. */
   reset: number;
+  /** Boxes put back on this batch: repairing a negative, or the top-up row. */
+  added: number;
 }
 
 export interface ResetPlan {
@@ -69,7 +106,12 @@ export interface ResetPlan {
   error: string;
   currentAvailable: number;
   target: number;
+  /** Boxes removed. */
   totalReset: number;
+  /** Boxes added — repairing negative batches, plus any top-up. */
+  totalAdded: number;
+  /** Boxes on the RESET-STOCK row, when the target is above what exists. */
+  topUp: number;
   totalReserved: number;
   /** Newest → oldest, the order retention was applied in. */
   batches: ResetBatchPlan[];
@@ -113,6 +155,9 @@ function newestFirst(a: ResetBatchInput, b: ResetBatchInput): number {
  * groups packed boxes by production_batch_id, so a single lump adjustment keyed
  * to the wrong sub-batch would misallocate there even though the batch-level
  * total looked right.
+ *
+ * Takes a positive magnitude and emits NEGATIVE `boxes` — these rows remove
+ * stock.
  */
 function splitAcrossRows(batch: ResetBatchInput, resetBoxes: number): ResetAdjustment[] {
   const positives = batch.rows
@@ -130,7 +175,7 @@ function splitAcrossRows(batch: ResetBatchInput, resetBoxes: number): ResetAdjus
       batchCode: batch.batchCode,
       productionBatchId: row.productionBatchId,
       sessionDate: row.sessionDate,
-      boxes: take,
+      boxes: -take,
     });
     remaining -= take;
   }
@@ -145,7 +190,7 @@ function splitAcrossRows(batch: ResetBatchInput, resetBoxes: number): ResetAdjus
         batchCode: batch.batchCode,
         productionBatchId: anchor.productionBatchId,
         sessionDate: anchor.sessionDate,
-        boxes: remaining,
+        boxes: -remaining,
       });
     }
   }
@@ -154,7 +199,27 @@ function splitAcrossRows(batch: ResetBatchInput, resetBoxes: number): ResetAdjus
 }
 
 /**
- * Plan a reset of one flavour down to `target` available boxes.
+ * The date a top-up row is stamped with.
+ *
+ * Never today: dashboard-home sums packing_sessions where session_date = today
+ * for its "packed today" figure, and a correction is not production. The
+ * earliest date the flavour already has keeps the row consistent with
+ * RESET-STOCK sorting oldest, so the ops-api FIFO (which orders by
+ * session_date) dispatches it first. Falls back to the epoch when the flavour
+ * has no dated rows at all — a flavour that went negative purely through
+ * reservations, with nothing ever packed.
+ */
+function topUpSessionDate(batches: ResetBatchInput[]): string {
+  const dates = batches
+    .flatMap(b => [b.sessionDate, ...b.rows.map(r => r.sessionDate)])
+    .filter((d): d is string => !!d);
+  return dates.length > 0 ? dates.reduce((a, b) => (a < b ? a : b)) : '1970-01-01';
+}
+
+/**
+ * Plan a correction of one flavour to `target` available boxes, in either
+ * direction and from any starting figure including a negative one.
+ *
  * Returns `ok: false` with a human-readable `error` rather than throwing, so the
  * dialog can render the refusal inline while the admin edits the number.
  */
@@ -168,6 +233,8 @@ export function planInventoryReset(batches: ResetBatchInput[], target: number): 
     currentAvailable,
     target,
     totalReset: 0,
+    totalAdded: 0,
+    topUp: 0,
     totalReserved,
     batches: [],
     adjustments: [],
@@ -180,38 +247,42 @@ export function planInventoryReset(batches: ResetBatchInput[], target: number): 
   if (target < 0) {
     return { ...base, error: 'Target cannot be negative.' };
   }
-  if (currentAvailable < 0) {
-    return {
-      ...base,
-      error: `This flavour is already oversold (${currentAvailable} available). `
-           + `Resolve the negative balance before resetting — "keep the latest N" has no meaning while the balance is short.`,
-    };
-  }
-  if (target > currentAvailable) {
-    return {
-      ...base,
-      error: `A reset can only reduce stock. Available is ${currentAvailable}; `
-           + `to add boxes, record a packing session instead.`,
-    };
-  }
 
   const warnings: string[] = [];
-  const negativeBatches = batches.filter(b => b.available < 0);
-  if (negativeBatches.length > 0) {
+  const ordered = [...batches].sort(newestFirst);
+  const adjustments: ResetAdjustment[] = [];
+
+  // ── Pass 1: repair batches sitting below zero ──────────────────────────
+  // A negative batch means boxes left that were never recorded as packed, so
+  // the correction goes on that batch — that is where the gap actually is.
+  const repaired = new Map<string, number>();
+  for (const batch of ordered) {
+    if (batch.available >= 0) continue;
+    const shortfall = -batch.available;
+    repaired.set(batch.batchCode, shortfall);
+    adjustments.push({
+      batchCode: batch.batchCode,
+      productionBatchId: batch.rows[0]?.productionBatchId ?? null,
+      sessionDate: batch.rows[0]?.sessionDate || batch.sessionDate,
+      boxes: shortfall,
+    });
+  }
+  if (repaired.size > 0) {
     warnings.push(
-      `${negativeBatches.length} batch${negativeBatches.length === 1 ? '' : 'es'} `
-      + `(${negativeBatches.map(b => b.batchCode).join(', ')}) show a negative balance. `
-      + `They are left untouched rather than reset deeper into the negative.`,
+      `${repaired.size} batch${repaired.size === 1 ? '' : 'es'} `
+      + `(${[...repaired.keys()].join(', ')}) had a negative balance and `
+      + `${repaired.size === 1 ? 'was' : 'were'} brought back to zero first.`,
     );
   }
 
-  const ordered = [...batches].sort(newestFirst);
+  // ── Pass 2: everything is now ≥ 0 ──────────────────────────────────────
+  const afterRepair = ordered.reduce((s, b) => s + Math.max(b.available, 0), 0);
+
+  // ── Pass 3: trim down to, or top up to, the target ─────────────────────
   const plans: ResetBatchPlan[] = [];
-  const adjustments: ResetAdjustment[] = [];
   let running = 0;
 
   for (const batch of ordered) {
-    // Negative-balance batches contribute nothing to retention and are not reset.
     const availableForRetention = Math.max(batch.available, 0);
     const keep  = Math.min(availableForRetention, Math.max(target - running, 0));
     const reset = availableForRetention - keep;
@@ -223,31 +294,45 @@ export function planInventoryReset(batches: ResetBatchInput[], target: number): 
       availableBefore: batch.available,
       keep,
       reset,
+      added: repaired.get(batch.batchCode) ?? 0,
     });
 
     if (reset > 0) adjustments.push(...splitAcrossRows(batch, reset));
   }
 
   const totalReset = plans.reduce((s, p) => s + p.reset, 0);
+  const topUp = Math.max(target - afterRepair, 0);
 
-  // The reset must account for exactly the gap between current and target.
-  // Negative-balance batches are excluded from retention, so they are the only
-  // legitimate source of drift — anything else is a bug and must not be written.
-  const expectedReset = batches.reduce((s, b) => s + Math.max(b.available, 0), 0) - target;
-  if (totalReset !== expectedReset) {
-    return {
-      ...base,
-      warnings,
-      error: `Internal check failed: planned ${totalReset} boxes but expected ${expectedReset}. Nothing was written.`,
-    };
+  if (topUp > 0) {
+    const sessionDate = topUpSessionDate(batches);
+    adjustments.push({
+      batchCode: RESET_BATCH_CODE,
+      productionBatchId: null,
+      sessionDate,
+      boxes: topUp,
+    });
+    plans.push({
+      batchCode: RESET_BATCH_CODE,
+      sessionDate,
+      availableBefore: 0,
+      keep: topUp,
+      reset: 0,
+      added: topUp,
+    });
   }
 
-  const adjustmentTotal = adjustments.reduce((s, a) => s + a.boxes, 0);
-  if (adjustmentTotal !== totalReset) {
+  const totalAdded = plans.reduce((s, p) => s + p.added, 0);
+
+  // The signed adjustments must land the flavour exactly on the target.
+  // Anything else is a bug and must not be written.
+  const netChange = adjustments.reduce((s, a) => s + a.boxes, 0);
+  const expectedNet = target - currentAvailable;
+  if (netChange !== expectedNet) {
     return {
       ...base,
       warnings,
-      error: `Internal check failed: adjustments total ${adjustmentTotal} but ${totalReset} boxes were planned. Nothing was written.`,
+      error: `Internal check failed: planned a net change of ${netChange} boxes `
+           + `but ${expectedNet} was required. Nothing was written.`,
     };
   }
 
@@ -257,6 +342,8 @@ export function planInventoryReset(batches: ResetBatchInput[], target: number): 
     currentAvailable,
     target,
     totalReset,
+    totalAdded,
+    topUp,
     totalReserved,
     batches: plans,
     adjustments,
