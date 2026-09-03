@@ -1085,6 +1085,13 @@ export class D2CComponent implements OnInit {
         invoice_number:   `D2C-${allocationId}`,
         dispatch_date:    today,
         worker_id:        null,
+        // Allocating to a channel IS the dispatch. Without this the Inventory
+        // screen treats the row as reserved, and nothing can ever release it:
+        // it classifies an event as dispatched from either this flag or the
+        // parent invoice's, and `D2C-<id>` matches no gg_invoices row. The
+        // boxes stay locked out of Available for good. The ops-api's own D2C
+        // path sets this for exactly the same reason.
+        is_dispatched:    true,
       }));
 
     if (records.length > 0) {
