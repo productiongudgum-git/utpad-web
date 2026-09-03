@@ -401,18 +401,37 @@ interface FlavorGroup {
                     </div>
                   }
 
-                  <div style="margin-top:14px;display:flex;gap:16px;flex-wrap:wrap;font-size:13px;">
-                    <span style="color:#6B7280;">Keeping <strong style="color:#01AC51;">{{ plan.target | number:'1.0-0' }}</strong></span>
+                  <!-- Composition, written so the parts reconcile to the result.
+                       A bare "adding N" next to the target read as though the
+                       two summed, implying a figure nobody asked for. -->
+                  <div style="margin-top:14px;font-size:13px;color:#6B7280;line-height:1.9;">
+                    @if (repairBoxes(plan) > 0) {
+                      <div>Clearing the negative balance
+                        <strong style="color:#01AC51;">+{{ repairBoxes(plan) | number:'1.0-0' }}</strong>
+                        <span style="color:#9CA3AF;">&nbsp;({{ plan.currentAvailable | number:'1.0-0' }} &rarr; {{ plan.currentAvailable + repairBoxes(plan) | number:'1.0-0' }})</span>
+                      </div>
+                    }
+                    @if (plan.topUp > 0) {
+                      <div>Adding as new stock
+                        <strong style="color:#01AC51;">+{{ plan.topUp | number:'1.0-0' }}</strong>
+                      </div>
+                    }
                     @if (plan.totalReset > 0) {
-                      <span style="color:#6B7280;">Removing <strong style="color:#dc2626;">{{ plan.totalReset | number:'1.0-0' }}</strong></span>
+                      <div>Removing
+                        <strong style="color:#dc2626;">&minus;{{ plan.totalReset | number:'1.0-0' }}</strong>
+                      </div>
                     }
-                    @if (plan.totalAdded > 0) {
-                      <span style="color:#6B7280;">Adding back <strong style="color:#01AC51;">{{ plan.totalAdded | number:'1.0-0' }}</strong></span>
-                    }
+                    <div style="border-top:1px solid #E5E7EB;margin-top:6px;padding-top:6px;">
+                      Available afterwards
+                      <strong style="color:#01AC51;font-size:15px;">{{ plan.target | number:'1.0-0' }}</strong>
+                      @if (plan.totalReserved > 0) {
+                        <span style="color:#9CA3AF;">&nbsp;· on-hand {{ plan.target + plan.totalReserved | number:'1.0-0' }}</span>
+                      }
+                    </div>
                   </div>
                   @if (plan.topUp > 0) {
                     <p style="margin:10px 0 0;font-size:12px;color:#6B7280;line-height:1.5;">
-                      {{ plan.topUp | number:'1.0-0' }} boxes have no batch behind them, so they are
+                      Those {{ plan.topUp | number:'1.0-0' }} boxes have no batch behind them, so they are
                       recorded against a <strong style="font-family:monospace;color:#374151;">RESET-STOCK</strong>
                       batch and will be dispatched first.
                     </p>
@@ -581,7 +600,15 @@ export class InventoryComponent implements OnInit, OnDestroy {
 
   /** Batches shown in the preview: newest first, matching the plan's order. */
   planRows(plan: ResetPlan) {
-    return plan.batches.filter(b => b.availableBefore !== 0 || b.reset !== 0);
+    // `added` must be part of the test: a top-up row starts at zero and removes
+    // nothing, so without it the RESET-STOCK line — the whole point of an
+    // increase — was filtered straight out of the preview.
+    return plan.batches.filter(b => b.availableBefore !== 0 || b.reset !== 0 || b.added !== 0);
+  }
+
+  /** Boxes added purely to clear negative batches, i.e. excluding the top-up. */
+  repairBoxes(plan: ResetPlan): number {
+    return plan.totalAdded - plan.topUp;
   }
 
   /**
