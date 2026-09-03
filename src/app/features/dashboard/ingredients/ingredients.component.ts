@@ -14,6 +14,9 @@ import { formatStockString, toCanonical } from '../../../shared/utils/unit-forma
 const LOW_BATCHES_SHARED     = 40;   // used in >= half of all recipes (base ingredient)
 const LOW_BATCHES_DEFAULT    = 15;   // used in fewer recipes (flavour-specific etc.)
 const SHARED_RECIPE_FRACTION = 0.5;  // "used in most recipes" cutoff
+/** Box count for a flavour with no explicit units_per_box — matches the column
+ *  default in migration 0008, and the constant used before packing variants. */
+const DEFAULT_UNITS_PER_BOX  = 15;
 
 interface Ingredient {
   id: string;
@@ -775,9 +778,11 @@ export class IngredientsComponent implements OnInit {
       this.supabase.client
         .from('recipe_lines')
         .select('recipe_id, ingredient_id, qty'),
+      // Variants included: a variant's own monocarton is attached by picking it
+      // in the packing-material flavour dropdown.
       this.supabase.client
         .from('gg_flavors')
-        .select('id, name')
+        .select('id, name, units_per_box, parent_flavor_id')
         .eq('active', true)
         .order('name'),
       this.supabase.client
@@ -788,9 +793,16 @@ export class IngredientsComponent implements OnInit {
         .select('ingredient_id, flavor_id'),
     ]);
 
-    this.flavors.set((flavorsData ?? []) as { id: string; name: string }[]);
+    this.flavors.set(((flavorsData ?? []) as any[]).map(f => ({
+      id: f.id,
+      // Variants are shown with their box count so a packing material is never
+      // attached to the wrong format by mistake.
+      name: f.parent_flavor_id ? `${f.name} · ${f.units_per_box}/box` : f.name,
+    })));
+    // Same decorated label as the dropdown, so the row and the picker agree on
+    // which format a packing material belongs to.
     const flavorNameById = new Map<string, string>(
-      (flavorsData ?? []).map((f: any) => [f.id, f.name]),
+      this.flavors().map(f => [f.id, f.name]),
     );
 
     const inventoryMap = new Map<string, any>();
@@ -827,6 +839,15 @@ export class IngredientsComponent implements OnInit {
       ? recipesArr.reduce((s, r) => s + (r.units_per_batch ?? 7500), 0) / recipesArr.length
       : 7500;
 
+    // Box format per flavour. A packing variant has its own units_per_box but no
+    // recipe of its own, so batch size resolves through its parent.
+    const unitsPerBoxByFlavorId = new Map<string, number>();
+    const parentByFlavorId      = new Map<string, string | null>();
+    ((flavorsData ?? []) as any[]).forEach(f => {
+      unitsPerBoxByFlavorId.set(f.id, Number(f.units_per_box ?? DEFAULT_UNITS_PER_BOX));
+      parentByFlavorId.set(f.id, f.parent_flavor_id ?? null);
+    });
+
     // packing_material_flavors → which flavours each packing SKU is linked to.
     const flavorsByPackingIng = new Map<string, string[]>();
     ((pmfData ?? []) as Array<{ ingredient_id: string; flavor_id: string }>).forEach(r => {
@@ -844,29 +865,37 @@ export class IngredientsComponent implements OnInit {
 
       if (i.packing_role) {
         // Packing material — consumed per box, not via recipe_lines.
-        // boxes per batch = units_per_batch / 15.
-        // Linked flavours come from (in priority): packing_flavor_id (single, monocartons)
-        // → packing_material_flavors join (subset, GG/GG+ ziplocks) → none = generic.
+        // boxes per batch = units_per_batch / units_per_box.
+        // Linked flavours come from (in priority): packing_flavor_id (single, monocartons
+        // including a variant's own) → packing_material_flavors join (subset, GG/GG+
+        // ziplocks) → none = generic.
         const qtyPerBox       = Number(i.qty_per_box) || 1;
         const linkedFlavorIds: string[] = i.packing_flavor_id
           ? [i.packing_flavor_id]
           : (flavorsByPackingIng.get(i.id) ?? []);
 
-        let upb: number;
+        let boxesPerBatch: number;
         if (linkedFlavorIds.length === 0) {
-          upb         = avgUnitsPerBatch;
-          recipeCount = recipesArr.length;
+          boxesPerBatch = avgUnitsPerBatch / DEFAULT_UNITS_PER_BOX;
+          recipeCount   = recipesArr.length;
         } else {
-          const linkedUpbs = linkedFlavorIds
-            .map(fid => unitsByFlavorId.get(fid))
-            .filter((v): v is number => v != null);
-          upb = linkedUpbs.length > 0
-            ? linkedUpbs.reduce((s, v) => s + v, 0) / linkedUpbs.length
-            : avgUnitsPerBatch;
-          recipeCount = linkedFlavorIds.length;
+          // Computed per flavour, because box counts differ between them: a
+          // variant's monocarton fills a smaller box out of the parent's batch,
+          // so more of them are consumed per batch.
+          const perFlavorBoxes = linkedFlavorIds.map(fid => {
+            const parentId = parentByFlavorId.get(fid) ?? null;
+            const batchUnits =
+              unitsByFlavorId.get(fid)
+              ?? (parentId ? unitsByFlavorId.get(parentId) : undefined)
+              ?? avgUnitsPerBatch;
+            const perBox = unitsPerBoxByFlavorId.get(fid) ?? DEFAULT_UNITS_PER_BOX;
+            return batchUnits / perBox;
+          });
+          boxesPerBatch = perFlavorBoxes.reduce((s, v) => s + v, 0) / perFlavorBoxes.length;
+          recipeCount   = linkedFlavorIds.length;
         }
 
-        avgPerBatch = qtyPerBox * (upb / 15);
+        avgPerBatch = qtyPerBox * boxesPerBatch;
         shared      = totalRecipes > 0 && recipeCount / totalRecipes >= SHARED_RECIPE_FRACTION;
       } else {
         // Recipe ingredient — mean qty across the recipes that use it.

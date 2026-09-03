@@ -759,7 +759,7 @@ export class InventoryComponent implements OnInit, OnDestroy {
 
     const flavorsP = this.supabase.client
       .from('gg_flavors')
-      .select('id, name');
+      .select('id, name, units_per_box, parent_flavor_id');
 
     const [
       { data: sessions },
@@ -770,9 +770,18 @@ export class InventoryComponent implements OnInit, OnDestroy {
     ] = await Promise.all([sessionsP, eventsP, invoicesP, returnsP, flavorsP]);
 
     // Flavor id → name (authoritative, so reserved/returned-only flavors still get a name).
+    //
+    // A packing variant is a flavour row of its own and gets its own stock line,
+    // which is the point — a 10-gum box and a 15-gum box are different goods and
+    // must not net against each other. Its box count is appended so the two
+    // lines can't be confused at a glance.
     const flavorNameMap = new Map<string, string>();
     for (const f of (flavorsData ?? []) as any[]) {
-      flavorNameMap.set(String(f.id), f.name ?? 'Unknown');
+      const base = f.name ?? 'Unknown';
+      flavorNameMap.set(
+        String(f.id),
+        f.parent_flavor_id ? `${base} · ${f.units_per_box ?? 15}/box` : base,
+      );
     }
 
     // Invoice number → status flags + needed-boxes-per-flavor.

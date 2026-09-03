@@ -363,7 +363,7 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
       const [todayProdRes, yesterdayProdRes, todayPackRes] = await Promise.all([
         // Today's production batches
         this.supabase.client.from('production_batches')
-          .select('batch_code, planned_yield, actual_yield, flavor:gg_flavors!production_batches_flavor_id_fkey(name), recipe:gg_recipes(units_per_batch)')
+          .select('batch_code, planned_yield, actual_yield, flavor:gg_flavors!production_batches_flavor_id_fkey(name, units_per_box), recipe:gg_recipes(units_per_batch)')
           .eq('production_date', today),
         // Yesterday's production batches (for comparison)
         this.supabase.client.from('production_batches')
@@ -402,10 +402,16 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
       const warnings: PackingWarning[] = [];
       for (const prod of todayBatches) {
         const plannedYield: number = (prod as any).planned_yield ?? 0;
-        // Recipe-driven expected boxes (units_per_batch / 15 pieces per box).
-        // Falls back to 500 if no recipe is linked.
+        // Recipe-driven expected boxes (units_per_batch / units_per_box).
+        // Falls back to 7500 units and 15 per box if no recipe is linked.
+        //
+        // Production always runs against a base flavour, so this uses that
+        // flavour's box count. If the batch is later split across packing
+        // variants the figure becomes an estimate — the boxes actually packed
+        // depend on which formats the packer chose.
         const unitsPerBatch: number = (prod as any).recipe?.units_per_batch ?? 7500;
-        const expectedBoxes = Math.round(unitsPerBatch / 15);
+        const unitsPerBox: number   = (prod as any).flavor?.units_per_box ?? 15;
+        const expectedBoxes = Math.round(unitsPerBatch / Math.max(1, unitsPerBox));
         const batchCode: string = (prod as any).batch_code ?? '';
         const packedBoxes = packTodayMap.get(batchCode) ?? 0;
         const boxesShort = Math.max(0, expectedBoxes - packedBoxes);

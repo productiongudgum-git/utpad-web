@@ -286,10 +286,14 @@ export class ProductionComponent implements OnInit {
   }
 
   async loadFlavors(): Promise<void> {
+    // Base flavours only. Packing variants are never produced — a batch is made
+    // as the parent flavour and the box format is chosen at packing time, so
+    // offering a variant here would create a batch nothing can pack against.
     const { data } = await this.supabase.client
       .from('gg_flavors')
       .select('id, name, code, active')
       .eq('active', true)
+      .is('parent_flavor_id', null)
       .order('name');
     if (data) this.flavors.set(data as FlavorDefinition[]);
   }

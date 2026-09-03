@@ -8,6 +8,11 @@ const LOW_BATCHES_SHARED     = 40;
 const LOW_BATCHES_DEFAULT    = 15;
 const SHARED_RECIPE_FRACTION = 0.5;
 
+/** Box count assumed for a flavour with no explicit units_per_box. Matches the
+ *  column default in migration 0008, and the constant this code used before
+ *  packing variants existed. */
+const DEFAULT_UNITS_PER_BOX = 15;
+
 export interface StockIngredient {
   id: string;
   name: string;
@@ -52,13 +57,24 @@ export class IngredientStockService {
   async refresh(): Promise<void> {
     this.loading.set(true);
     try {
-      const [ingredientsRes, inventoryRes, recipeLinesRes, recipesRes, pmfRes] = await Promise.all([
+      const [ingredientsRes, inventoryRes, recipeLinesRes, recipesRes, pmfRes, flavorsRes] = await Promise.all([
         this.supabase.client.from('gg_ingredients').select('id, name, default_unit, packing_role, packing_flavor_id, qty_per_box').order('name'),
         this.supabase.client.from('inventory_raw_materials').select('ingredient_id, current_qty, unit'),
         this.supabase.client.from('recipe_lines').select('recipe_id, ingredient_id, qty'),
         this.supabase.client.from('gg_recipes').select('id, flavor_id, units_per_batch'),
         this.supabase.client.from('packing_material_flavors').select('ingredient_id, flavor_id'),
+        this.supabase.client.from('gg_flavors').select('id, units_per_box, parent_flavor_id'),
       ]);
+
+      // Box format per flavour. A packing variant has its own units_per_box but
+      // no recipe of its own — production runs against the parent — so batch
+      // size is looked up through parent_flavor_id.
+      const unitsPerBoxByFlavorId = new Map<string, number>();
+      const parentByFlavorId      = new Map<string, string | null>();
+      ((flavorsRes.data ?? []) as any[]).forEach(f => {
+        unitsPerBoxByFlavorId.set(f.id, Number(f.units_per_box ?? DEFAULT_UNITS_PER_BOX));
+        parentByFlavorId.set(f.id, f.parent_flavor_id ?? null);
+      });
 
       // Per-flavour units_per_batch + overall average (drives packing-material math).
       const recipes = (recipesRes.data ?? []) as Array<{ id: string; flavor_id: string; units_per_batch: number }>;
@@ -105,9 +121,9 @@ export class IngredientStockService {
 
           if (i.packing_role) {
             // Packing material — consumed per box, not via recipe_lines.
-            // boxes per batch = units_per_batch / 15 pieces per box.
+            // boxes per batch = units_per_batch / units_per_box.
             // Linked flavours come from three places, in priority order:
-            //   1. packing_flavor_id (single — monocartons)
+            //   1. packing_flavor_id (single — monocartons, incl. a variant's own)
             //   2. packing_material_flavors join table (subset — GG / GG+ ziplocks)
             //   3. neither set → truly generic, applies to every recipe
             const qtyPerBox       = Number(i.qty_per_box) || 1;
@@ -115,21 +131,28 @@ export class IngredientStockService {
               ? [i.packing_flavor_id]
               : (flavorsByPackingIng.get(i.id) ?? []);
 
-            let upb: number;
+            let boxesPerBatch: number;
             if (linkedFlavorIds.length === 0) {
-              upb         = avgUnitsPerBatch;
-              recipeCount = recipes.length;
+              boxesPerBatch = avgUnitsPerBatch / DEFAULT_UNITS_PER_BOX;
+              recipeCount   = recipes.length;
             } else {
-              const linkedUpbs = linkedFlavorIds
-                .map((fid: string) => unitsByFlavorId.get(fid))
-                .filter((v: number | undefined): v is number => v != null);
-              upb = linkedUpbs.length > 0
-                ? linkedUpbs.reduce((s, v) => s + v, 0) / linkedUpbs.length
-                : avgUnitsPerBatch;
-              recipeCount = linkedFlavorIds.length;
+              // Per linked flavour, because box counts now differ between them:
+              // a variant's monocarton fills a 10-gum box out of the parent's
+              // batch, so it is consumed faster than the parent's 15-gum box.
+              const perFlavorBoxes = linkedFlavorIds.map((fid: string) => {
+                const parentId = parentByFlavorId.get(fid) ?? null;
+                const batchUnits =
+                  unitsByFlavorId.get(fid)
+                  ?? (parentId ? unitsByFlavorId.get(parentId) : undefined)
+                  ?? avgUnitsPerBatch;
+                const perBox = unitsPerBoxByFlavorId.get(fid) ?? DEFAULT_UNITS_PER_BOX;
+                return batchUnits / perBox;
+              });
+              boxesPerBatch = perFlavorBoxes.reduce((s, v) => s + v, 0) / perFlavorBoxes.length;
+              recipeCount   = linkedFlavorIds.length;
             }
 
-            avgPerBatch = qtyPerBox * (upb / 15);
+            avgPerBatch = qtyPerBox * boxesPerBatch;
             // Base-vs-flavour-specific tier — uses the same "covers ≥50% of recipes" rule
             // as raw ingredients, so GG Ziplock (9/15 flavours) trips the higher 40-batch
             // threshold while GG+ Ziplock (4/15) and monocartons (1/15) sit at 15.

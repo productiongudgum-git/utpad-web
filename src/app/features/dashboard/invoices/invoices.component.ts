@@ -6,12 +6,36 @@ import { CsvImportModalComponent } from './csv-import-modal.component';
 import { PdfImportModalComponent } from './pdf-import-modal.component';
 
 interface Customer { id: string; name: string; }
-interface Flavor   { id: string; name: string; }
+
+interface Flavor {
+  id: string;
+  name: string;
+  units_per_box: number;
+  /** Set when this row is a packing variant of another flavour. */
+  parent_flavor_id: string | null;
+  /** The customer this pack is usually for — a sort hint, never a restriction. */
+  default_customer_id: string | null;
+}
+
+/** A flavour as offered in the picker, already labelled and ordered. */
+interface FlavorOption {
+  id: string;
+  label: string;
+  units_per_box: number;
+  /** True when this variant is tagged to the invoice's customer. */
+  suggested: boolean;
+}
 
 interface InvoiceItem {
   flavor_id: string;
   flavor_name: string;
   quantity_boxes: number;
+  /**
+   * Gums per box at the time the invoice was written. Denormalised on purpose:
+   * a variant's box count can be corrected later, and an old invoice must keep
+   * reading the way it was raised.
+   */
+  units_per_box?: number;
 }
 
 interface InvoiceRow {
@@ -149,6 +173,9 @@ interface InvoiceRow {
                 <label class="inv-label" style="margin:0;">
                   Flavors &amp; Quantities
                   <span style="font-weight:400;color:#9CA3AF;font-size:11px;"> — add one line per flavor</span>
+                  @if (formHasSuggestions()) {
+                    <span style="font-weight:400;color:#d97706;font-size:11px;display:block;margin-top:2px;">★ packing variant usually made for this customer</span>
+                  }
                 </label>
                 <button type="button" (click)="addItemLine()"
                         style="padding:5px 12px;background:#f0fdf4;border:1px solid #01AC51;color:#01AC51;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;">
@@ -173,8 +200,8 @@ interface InvoiceRow {
                               class="gg-input dropdown-with-arrow" style="font-size:13px;"
                               (change)="onFlavorSelect(line)">
                         <option value="">Select flavor…</option>
-                        @for (f of flavors(); track f.id) {
-                          <option [value]="f.id">{{ f.name }}</option>
+                        @for (f of formFlavorOptions(); track f.id) {
+                          <option [value]="f.id">{{ f.suggested ? '★ ' : '' }}{{ f.label }}</option>
                         }
                       </select>
                       <input [(ngModel)]="line.quantity_boxes" [ngModelOptions]="{standalone:true}"
@@ -362,7 +389,12 @@ interface InvoiceRow {
             <!-- Items -->
             <div style="margin-bottom:20px;">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-                <label class="inv-label" style="margin:0;">Flavors &amp; Quantities</label>
+                <label class="inv-label" style="margin:0;">
+                  Flavors &amp; Quantities
+                  @if (editHasSuggestions()) {
+                    <span style="font-weight:400;color:#d97706;font-size:11px;display:block;margin-top:2px;">★ packing variant usually made for this customer</span>
+                  }
+                </label>
                 <button type="button" (click)="addEditItemLine()"
                         style="padding:5px 12px;background:#f0fdf4;border:1px solid #01AC51;color:#01AC51;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;">
                   <span class="material-icons-round" style="font-size:14px;">add</span> Add flavor
@@ -385,8 +417,8 @@ interface InvoiceRow {
                       <select [(ngModel)]="line.flavor_id" class="gg-input dropdown-with-arrow" style="font-size:13px;"
                               (change)="onEditFlavorSelect(line)">
                         <option value="">Select flavor…</option>
-                        @for (f of flavors(); track f.id) {
-                          <option [value]="f.id">{{ f.name }}</option>
+                        @for (f of editFlavorOptions(); track f.id) {
+                          <option [value]="f.id">{{ f.suggested ? '★ ' : '' }}{{ f.label }}</option>
                         }
                       </select>
                       <input [(ngModel)]="line.quantity_boxes" type="number" min="1" step="1" class="gg-input"
@@ -459,7 +491,7 @@ export class InvoicesComponent implements OnInit {
   invoices  = signal<InvoiceRow[]>([]);
   customers = signal<Customer[]>([]);
   flavors   = signal<Flavor[]>([]);
-  itemLines = signal<{ flavor_id: string; flavor_name: string; quantity_boxes: number }[]>([]);
+  itemLines = signal<InvoiceItem[]>([]);
   formError = signal('');
   toast     = signal('');
   toastKind = signal<'success' | 'error'>('success');
@@ -470,13 +502,25 @@ export class InvoicesComponent implements OnInit {
 
   // Edit state
   editingInvoice      = signal<InvoiceRow | null>(null);
-  editItemLines       = signal<{ flavor_id: string; flavor_name: string; quantity_boxes: number }[]>([]);
+  editItemLines       = signal<InvoiceItem[]>([]);
   editCustomerInput   = '';
   editCustomerHint    = signal('');
   editCustomerIsNew   = signal(false);
   editDispatchDate    = signal('');
   editSaving          = signal(false);
   editError           = signal('');
+
+  // Which customer each form is currently on, so variants tagged to them can
+  // float to the top of the flavour picker. Kept as signals (rather than read
+  // off the ngModel strings) so the option lists recompute as you type.
+  private readonly formCustomerId = signal<string | null>(null);
+  private readonly editCustomerId = signal<string | null>(null);
+
+  readonly formFlavorOptions = computed(() => this.orderFlavors(this.formCustomerId()));
+  readonly editFlavorOptions = computed(() => this.orderFlavors(this.editCustomerId()));
+
+  readonly formHasSuggestions = computed(() => this.formFlavorOptions().some(o => o.suggested));
+  readonly editHasSuggestions = computed(() => this.editFlavorOptions().some(o => o.suggested));
 
   // Filters
   customerFilter = signal('');
@@ -515,6 +559,7 @@ export class InvoicesComponent implements OnInit {
     this.form.reset({ invoice_number: '', expected_dispatch_date: '' });
     this.customerNameInput = '';
     this.customerHint.set('');
+    this.formCustomerId.set(null);
     this.itemLines.set([{ flavor_id: '', flavor_name: '', quantity_boxes: 0 }]);
     this.formError.set('');
     this.showForm.set(true);
@@ -591,11 +636,15 @@ export class InvoicesComponent implements OnInit {
       this.customerIsNew.set(true);
       this.customerHint.set('New customer — will be created on save');
     }
+    this.formCustomerId.set(this.customerIdFromName(this.customerNameInput));
   }
 
-  onFlavorSelect(line: { flavor_id: string; flavor_name: string; quantity_boxes: number }): void {
+  onFlavorSelect(line: InvoiceItem): void {
     const f = this.flavors().find(fl => fl.id === line.flavor_id);
-    if (f) line.flavor_name = f.name;
+    if (f) {
+      line.flavor_name   = f.name;
+      line.units_per_box = f.units_per_box;
+    }
   }
 
   addItemLine(): void {
@@ -613,6 +662,7 @@ export class InvoicesComponent implements OnInit {
     this.editCustomerIsNew.set(false);
     this.editDispatchDate.set(inv.expected_dispatch_date ?? '');
     this.editItemLines.set(inv.items.map(it => ({ ...it })));
+    this.editCustomerId.set(this.customerIdFromName(inv.customer_name));
     this.editError.set('');
   }
 
@@ -633,11 +683,15 @@ export class InvoicesComponent implements OnInit {
       this.editCustomerIsNew.set(true);
       this.editCustomerHint.set('New customer — will be created on save');
     }
+    this.editCustomerId.set(this.customerIdFromName(this.editCustomerInput));
   }
 
-  onEditFlavorSelect(line: { flavor_id: string; flavor_name: string; quantity_boxes: number }): void {
+  onEditFlavorSelect(line: InvoiceItem): void {
     const f = this.flavors().find(fl => fl.id === line.flavor_id);
-    if (f) line.flavor_name = f.name;
+    if (f) {
+      line.flavor_name   = f.name;
+      line.units_per_box = f.units_per_box;
+    }
   }
 
   addEditItemLine(): void {
@@ -797,12 +851,45 @@ export class InvoicesComponent implements OnInit {
   }
 
   private async loadFlavors(): Promise<void> {
+    // Variants are included: they are sellable goods with their own stock, and
+    // picking one directly on the invoice is the whole point of the feature.
     const { data } = await this.supabase.client
       .from('gg_flavors')
-      .select('id, name')
+      .select('id, name, units_per_box, parent_flavor_id, default_customer_id')
       .eq('active', true)
       .order('name');
-    this.flavors.set(data ?? []);
+    this.flavors.set(((data ?? []) as any[]).map(f => ({
+      id: f.id,
+      name: f.name,
+      units_per_box: Number(f.units_per_box ?? 15),
+      parent_flavor_id: f.parent_flavor_id ?? null,
+      default_customer_id: f.default_customer_id ?? null,
+    })));
+  }
+
+  /**
+   * Picker options for one invoice: variants tagged to this customer float to
+   * the top, everything else stays alphabetical. Nothing is filtered out — the
+   * customer link is a shortcut, so any flavour remains selectable for anyone.
+   */
+  private orderFlavors(customerId: string | null): FlavorOption[] {
+    const options = this.flavors().map(f => ({
+      id: f.id,
+      label: f.parent_flavor_id ? `${f.name} · ${f.units_per_box}/box` : f.name,
+      units_per_box: f.units_per_box,
+      suggested: !!customerId && f.default_customer_id === customerId,
+    }));
+    return options.sort((a, b) => {
+      if (a.suggested !== b.suggested) return a.suggested ? -1 : 1;
+      return a.label.localeCompare(b.label);
+    });
+  }
+
+  /** Resolves a typed customer name to an id, for the suggestion sort only. */
+  private customerIdFromName(name: string): string | null {
+    const q = name.trim().toLowerCase();
+    if (!q) return null;
+    return this.customers().find(c => c.name.toLowerCase() === q)?.id ?? null;
   }
 
   private showToast(msg: string, kind: 'success' | 'error'): void {
