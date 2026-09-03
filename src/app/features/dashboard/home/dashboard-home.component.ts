@@ -25,6 +25,9 @@ interface PackingWarning {
 }
 
 interface BatchDetail {
+  /** production_batches.id — the only unique key here. batch_code is per calendar
+   *  day and is shared by every batch made that day, so it can't track rows. */
+  id: string;
   batch_code: string;
   batch_number: number | null;
   flavor_name: string;
@@ -153,6 +156,18 @@ interface BatchDetail {
               <span style="font-size:12px;color:#6B7280;background:#e5e7eb;padding:3px 10px;border-radius:10px;white-space:nowrap;">
                 {{ filteredBatches().length }} batch{{ filteredBatches().length !== 1 ? 'es' : '' }}
               </span>
+              <button (click)="downloadBatchReport()"
+                      [disabled]="downloadingReport() || filteredBatches().length === 0"
+                      [title]="filteredBatches().length === 0 ? 'No batches to download' : 'Download this date range as an Excel report'"
+                      style="display:flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;font-weight:600;background:#fff;color:#374151;white-space:nowrap;"
+                      [style.cursor]="downloadingReport() || filteredBatches().length === 0 ? 'not-allowed' : 'pointer'"
+                      [style.opacity]="downloadingReport() || filteredBatches().length === 0 ? '0.55' : '1'">
+                <span class="material-icons-round" style="font-size:16px;"
+                      [style.animation]="downloadingReport() ? 'spin 1s linear infinite' : 'none'">
+                  {{ downloadingReport() ? 'refresh' : 'download' }}
+                </span>
+                {{ downloadingReport() ? 'Preparing…' : 'Download' }}
+              </button>
             </div>
           </div>
 
@@ -179,7 +194,7 @@ interface BatchDetail {
                   </tr>
                 </thead>
                 <tbody>
-                  @for (b of filteredBatches(); track b.batch_code) {
+                  @for (b of filteredBatches(); track b.id) {
                     <tr [style.background]="isRowRed(b) ? '#fee2e2' : ''" style="border-bottom:1px solid #f3f4f6;">
                       <td style="padding:12px 16px;font-family:monospace;font-size:13px;font-weight:700;color:#121212;">{{ b.batch_code }}</td>
                       <td style="padding:12px 16px;font-size:13px;color:#374151;">{{ b.batch_number ?? '—' }}</td>
@@ -309,6 +324,7 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
   // Active Batches expanded panel
   expandActiveBatches = signal(false);
   batchDetails        = signal<BatchDetail[]>([]);
+  downloadingReport   = signal(false);
   batchFilterFrom     = '';
   batchFilterTo       = '';
 
@@ -452,6 +468,7 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
           packing_status = pack.statuses.some(s => s === 'complete') ? 'complete' : 'partial';
         }
         return {
+          id:              b.id,
           batch_code:      b.batch_code,
           batch_number:    b.batch_number ?? null,
           flavor_name:     b.flavor?.name ?? '—',
@@ -463,6 +480,117 @@ export class DashboardHomeComponent implements OnInit, OnDestroy {
     } finally {
       this.batchDetailsLoading.set(false);
     }
+  }
+
+  /**
+   * Downloads the Active Batches panel as a two-sheet Excel workbook.
+   *
+   *   Sheet 1 "Production Batches" — one row per batch, mirroring the on-screen table.
+   *   Sheet 2 "Flavour Summary"    — batches produced per flavour + a grand total.
+   *
+   * Built from filteredBatches() rather than a fresh query, so the file always
+   * matches exactly what the date pickers are showing.
+   *
+   * ExcelJS is imported dynamically: its browser bundle is ~950 kB, and a static
+   * import would drag that into the dashboard chunk for everyone who never clicks
+   * Download. This way it is fetched on first use only.
+   */
+  async downloadBatchReport(): Promise<void> {
+    const rows = this.filteredBatches();
+    if (rows.length === 0 || this.downloadingReport()) return;
+
+    this.downloadingReport.set(true);
+    try {
+      const ExcelJS: any = await import('exceljs');
+      const Workbook = ExcelJS.Workbook ?? ExcelJS.default?.Workbook;
+      const workbook = new Workbook();
+
+      const from = this.batchFilterFrom;
+      const to   = this.batchFilterTo;
+
+      // ── Sheet 1: the batch rows, same columns and order as the table ──
+      const batchSheet = workbook.addWorksheet('Production Batches');
+      batchSheet.columns = [
+        { header: 'Batch Code',      key: 'batch_code',      width: 14 },
+        { header: 'Batch #',         key: 'batch_number',    width: 10 },
+        { header: 'Flavour',         key: 'flavor_name',     width: 26 },
+        { header: 'Packed Boxes',    key: 'total_packed',    width: 14 },
+        { header: 'Packing Status',  key: 'packing_status',  width: 18 },
+        { header: 'Production Date', key: 'production_date', width: 16 },
+      ];
+      rows.forEach(b => batchSheet.addRow({
+        batch_code:      b.batch_code,
+        batch_number:    b.batch_number ?? '—',
+        flavor_name:     b.flavor_name,
+        total_packed:    b.total_packed,
+        packing_status:  this.packingStatusLabel(b.packing_status),
+        production_date: b.production_date,
+      }));
+      this.styleReportHeader(batchSheet);
+
+      // ── Sheet 2: batches produced per flavour ──
+      // Counts ROWS, not distinct batch codes: batch_code is generated per
+      // calendar day and shared by every batch made that day, so counting codes
+      // would report a day of 8 batches as 1.
+      const countsByFlavour = new Map<string, number>();
+      for (const b of rows) {
+        const name = b.flavor_name || '—';
+        countsByFlavour.set(name, (countsByFlavour.get(name) ?? 0) + 1);
+      }
+
+      const summarySheet = workbook.addWorksheet('Flavour Summary');
+      summarySheet.columns = [
+        { header: 'Name of the flavour', key: 'flavour', width: 30 },
+        { header: 'Batches produced',    key: 'batches', width: 20 },
+      ];
+      [...countsByFlavour.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .forEach(([flavour, batches]) => summarySheet.addRow({ flavour, batches }));
+
+      const totalRow = summarySheet.addRow({
+        flavour: 'Total batches produced',
+        batches: rows.length,
+      });
+      totalRow.font = { bold: true };
+      totalRow.eachCell((cell: any) => {
+        cell.border = { top: { style: 'thin', color: { argb: 'FF143D36' } } };
+      });
+      this.styleReportHeader(summarySheet);
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      this.saveWorkbook(buffer, `production-batches-${from}_to_${to}.xlsx`);
+    } catch (err) {
+      console.error('[dashboard-home] Batch report download failed', err);
+      alert('Could not generate the report. Please try again.');
+    } finally {
+      this.downloadingReport.set(false);
+    }
+  }
+
+  /** Bold white on brand green, frozen — same look as the courier-analysis workbooks. */
+  private styleReportHeader(sheet: any): void {
+    const header = sheet.getRow(1);
+    header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    header.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF143D36' } };
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+  }
+
+  private saveWorkbook(buffer: ArrayBuffer, filename: string): void {
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  private packingStatusLabel(status: BatchDetail['packing_status']): string {
+    if (status === 'complete') return 'Packing Complete';
+    if (status === 'partial')  return 'Partially Packed';
+    return 'Not Packed';
   }
 
   isRowRed(b: BatchDetail): boolean {
