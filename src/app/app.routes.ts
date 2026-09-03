@@ -25,6 +25,7 @@ export const routes: Routes = [
       { path: 'inventory',   loadComponent: () => import('./features/dashboard/inventory/inventory.component').then(m => m.InventoryComponent) },
       { path: 'ingredients', loadComponent: () => import('./features/dashboard/ingredients/ingredients.component').then(m => m.IngredientsComponent) },
       { path: 'flavors',     loadComponent: () => import('./features/dashboard/flavors/flavors.component').then(m => m.FlavorsComponent) },
+      { path: 'packing-variants', loadComponent: () => import('./features/dashboard/flavors/packing-variants.component').then(m => m.PackingVariantsComponent) },
       { path: 'vendors',     loadComponent: () => import('./features/dashboard/vendors/vendors.component').then(m => m.VendorsComponent) },
       { path: 'customers',   loadComponent: () => import('./features/dashboard/customers/customers.component').then(m => m.CustomersComponent) },
       { path: 'team',        loadComponent: () => import('./features/dashboard/team/team.component').then(m => m.TeamComponent) },

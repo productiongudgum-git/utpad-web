@@ -166,7 +166,14 @@ export class FlavorsComponent implements OnInit {
 
   private async loadData(): Promise<void> {
     this.loading.set(true);
-    const { data: fl } = await this.supabase.client.from('gg_flavors').select('id, name, code, description, active').order('name');
+    // Base flavours only. Packing variants are gg_flavors rows too, but they are
+    // managed on the Packing Variants screen — listing them here would mix the
+    // recipe catalogue with box formats and invite duplicate-looking entries.
+    const { data: fl } = await this.supabase.client
+      .from('gg_flavors')
+      .select('id, name, code, description, active')
+      .is('parent_flavor_id', null)
+      .order('name');
     const { data: rc } = await this.supabase.client.from('gg_recipes').select('flavor_id').eq('is_active', true);
     const rcMap = new Map<string, number>();
     (rc ?? []).forEach((r: any) => rcMap.set(r.flavor_id, (rcMap.get(r.flavor_id) ?? 0) + 1));

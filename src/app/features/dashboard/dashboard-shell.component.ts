@@ -128,6 +128,9 @@ export class DashboardShellComponent {
     // stray duplicate flavors. The /flavors route still works via direct URL
     // if you ever need to inspect or clean up.
     { label: 'Inventory',   icon: 'inventory_2',             route: 'inventory' },
+    // Packing variants are the one legitimate reason to hand-create a flavour
+    // row, so they get their own entry while /flavors stays hidden.
+    { label: 'Packing Variants', icon: 'takeout_dining',     route: 'packing-variants' },
     { label: 'Ingredients', icon: 'category',                route: 'ingredients' },
     { label: 'Wastage',     icon: 'delete_sweep',            route: 'wastage' },
     { label: 'Invoices',    icon: 'description',             route: 'invoices' },
