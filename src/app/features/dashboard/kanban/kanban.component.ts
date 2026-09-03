@@ -418,14 +418,20 @@ export class KanbanComponent implements OnInit, OnDestroy {
     };
   }
 
+  /** Format a kg value to 2 decimals (with thousands separators). */
+  private fmtKg(n: any): string {
+    return Number(n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
   private mapProduction(row: any): KanbanItem {
     const flavor = this.firstRelation<any>(row.flavor);
     const sku = this.firstRelation<any>(row.sku);
     const recipe = this.firstRelation<any>(row.recipe);
-    const recipeLabel = recipe?.title ?? recipe?.code ?? row.recipe_id ?? 'No recipe linked';
+    // Only show a human-readable recipe name; never the raw recipe_id UUID.
+    const recipeLabel = recipe?.title ?? recipe?.code ?? '';
     const yieldParts = [
-      row.planned_yield != null ? `Planned ${row.planned_yield} kg` : '',
-      row.actual_yield != null ? `Actual ${row.actual_yield} kg` : '',
+      row.planned_yield != null ? `Planned ${this.fmtKg(row.planned_yield)} kg` : '',
+      row.actual_yield != null ? `Actual ${this.fmtKg(row.actual_yield)} kg` : '',
       row.status ? `Status ${row.status}` : '',
     ].filter(Boolean);
 
@@ -440,8 +446,8 @@ export class KanbanComponent implements OnInit, OnDestroy {
       title: flavor?.name ?? sku?.name ?? row.flavor_id ?? row.sku_id,
       subtitle: [recipeLabel, ...yieldParts].filter(Boolean).join(' · '),
       quantityDisplay: row.actual_yield != null
-        ? `${Number(row.actual_yield).toLocaleString()} kg output`
-        : `${Number(row.planned_yield ?? 0).toLocaleString()} kg planned`,
+        ? `${this.fmtKg(row.actual_yield)} kg output`
+        : `${this.fmtKg(row.planned_yield ?? 0)} kg planned`,
     };
   }
 
