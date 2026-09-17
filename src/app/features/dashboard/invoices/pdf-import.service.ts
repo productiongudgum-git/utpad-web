@@ -36,6 +36,18 @@ export interface PdfInvoice {
   items: PdfInvoiceItem[];
   /** Distinguishes the two PDF shapes the importer can read. */
   documentType: 'invoice' | 'challan';
+  /**
+   * Non-empty when the parsed rows don't add up (missing row numbers, or line
+   * amounts that don't match the PDF's Sub Total). The preview must show this
+   * and the user must check the rows before importing.
+   */
+  parseWarning: string;
+}
+
+/** Internal: a parsed row plus the bits we need for the sanity check. */
+interface RawItem extends PdfInvoiceItem {
+  seq: number;
+  amount: number;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -145,8 +157,14 @@ export class PdfImportService {
     // .+? to allow newlines inside the capture. Same PDF can mix 8-digit
     // (17041000) and 6-digit (170410) HSN codes across items, so accept both.
     // The Gud anchor still prevents header/address text from being pulled in.
-    const itemRe = /^\s*(\d+)\s+(Gud[\s\S]+?)\s+170410(?:00)?\s+(\d+(?:\.\d+)?)\s*(?:pcs)?\s+\d+(?:\.\d+)?(?:\s+\d+(?:\.\d+)?%\s+[\d.,]+){1,2}\s+[\d.,]+\s*$/gm;
-    const items: PdfInvoiceItem[] = [];
+    // HSN: the 8-digit code often doesn't fit its column and Zoho wraps the last
+    // digit onto the next line ("1704100" / "0"). If we only accept exactly
+    // 170410 or 17041000, the lazy description runs on into the NEXT item and
+    // silently merges rows. So accept 17041 + 1–3 digits.
+    // A standalone "pcs" line is glued onto the end of the row by the normalize
+    // step, so allow it after the amount as well.
+    const itemRe = /^\s*(\d+)\s+(Gud[\s\S]+?)\s+17041\d{1,3}\s+(\d+(?:\.\d+)?)\s*(?:pcs)?\s+\d+(?:\.\d+)?(?:\s+\d+(?:\.\d+)?%\s+[\d.,]+){1,2}\s+([\d.,]+)(?:\s+pcs)?\s*$/gm;
+    const items: RawItem[] = [];
     let m: RegExpExecArray | null;
     while ((m = itemRe.exec(normalized)) !== null) {
       // Drop everything past the first line — Zoho puts "8 outers + 4 samples"
@@ -157,6 +175,8 @@ export class PdfImportService {
         description,
         cleanedName: cleanFlavorName(description),
         quantityBoxes: Math.round(Number(m[3])),
+        seq: Number(m[1]),
+        amount: toNumber(m[4]),
       });
     }
     if (items.length === 0) {
@@ -169,7 +189,8 @@ export class PdfImportService {
       invoiceDate:   toIsoDate(dateMatch[1]),
       customerName,
       customerGstin,
-      items,
+      items: stripRaw(items),
+      parseWarning: checkItems(items, normalized),
     };
   }
 
@@ -237,8 +258,10 @@ export class PdfImportService {
     // Anchoring description to start with "Gud" so header/address text (like
     // "Place Of Supply : Haryana India # Item & Description HSN/SAC Qty Rate Amount")
     // can't get pulled into the first item's description group.
-    const itemRe = /^\s*(\d+)\s+(Gud[\s\S]+?)\s+170410(?:00)?\s+(\d+(?:\.\d+)?)\s*(?:pcs)?\s+\d+(?:\.\d+)?\s+[\d.,]+\s*$/gm;
-    const items: PdfInvoiceItem[] = [];
+    // HSN accepts 17041 + 1–3 digits so a wrapped "1704100" / "0" still matches
+    // (see the note in parseZohoInvoice).
+    const itemRe = /^\s*(\d+)\s+(Gud[\s\S]+?)\s+17041\d{1,3}\s+(\d+(?:\.\d+)?)\s*(?:pcs)?\s+\d+(?:\.\d+)?\s+([\d.,]+)(?:\s+pcs)?\s*$/gm;
+    const items: RawItem[] = [];
     let m: RegExpExecArray | null;
     while ((m = itemRe.exec(normalized)) !== null) {
       // First line only — challan notes ("Cola Charge & Cola Caffeine are the
@@ -248,6 +271,8 @@ export class PdfImportService {
         description,
         cleanedName: cleanFlavorName(description),
         quantityBoxes: Math.round(Number(m[3])),
+        seq: Number(m[1]),
+        amount: toNumber(m[4]),
       });
     }
     if (items.length === 0) {
@@ -261,9 +286,65 @@ export class PdfImportService {
       invoiceDate:   toIsoDate(dateMatch[1]),
       customerName,
       customerGstin: '',  // Challans typically only show our GSTIN, not the recipient's.
-      items,
+      items: stripRaw(items),
+      parseWarning: checkItems(items, normalized),
     };
   }
+}
+
+/**
+ * Sanity check on parsed rows. Two independent checks so one missing label
+ * doesn't disable the safety net:
+ *   1. Row numbers must run 1, 2, 3 … with no gaps. A skipped or merged row
+ *      shows up as a gap (e.g. 1, 4, 5).
+ *   2. If the PDF has a "Sub Total", the line amounts must add up to it
+ *      (within ₹1 for rounding).
+ * Returns '' when everything adds up.
+ */
+function checkItems(items: RawItem[], text: string): string {
+  const problems: string[] = [];
+
+  const seqs = items.map((i) => i.seq);
+  const expected = Array.from({ length: seqs.length }, (_, i) => i + 1);
+  if (seqs.join(',') !== expected.join(',')) {
+    const maxSeq = Math.max(...seqs);
+    const missing: number[] = [];
+    for (let n = 1; n <= maxSeq; n++) if (!seqs.includes(n)) missing.push(n);
+    problems.push(
+      missing.length > 0
+        ? `Row${missing.length === 1 ? '' : 's'} ${missing.join(', ')} could not be read or got merged into another row.`
+        : `Row numbers look out of order (${seqs.join(', ')}).`,
+    );
+  }
+
+  const subMatch = text.match(/Sub\s*Total\s*:?\s*(?:₹|Rs\.?|INR)?\s*([\d,]+(?:\.\d+)?)/i);
+  if (subMatch) {
+    const subTotal = toNumber(subMatch[1]);
+    const sum = items.reduce((s, i) => s + i.amount, 0);
+    if (Math.abs(sum - subTotal) > 1) {
+      problems.push(
+        `Line amounts add up to ₹${formatInr(sum)} but the PDF Sub Total is ₹${formatInr(subTotal)}.`,
+      );
+    }
+  }
+
+  return problems.length > 0
+    ? `${problems.join(' ')} Some items may be missing or have the wrong quantity. Check the rows against the PDF before importing.`
+    : '';
+}
+
+function stripRaw(items: RawItem[]): PdfInvoiceItem[] {
+  return items.map(({ description, cleanedName, quantityBoxes }) => ({ description, cleanedName, quantityBoxes }));
+}
+
+/** "2,285.60" → 2285.6 */
+function toNumber(s: string): number {
+  const n = Number(String(s).replace(/,/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatInr(n: number): string {
+  return n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 /**

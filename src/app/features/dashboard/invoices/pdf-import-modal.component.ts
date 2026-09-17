@@ -122,6 +122,21 @@ interface InvoiceForm {
                   }
                 </div>
 
+                <!-- Parse sanity-check warning. Shown even when unticked so the
+                     user knows why this invoice was left out by default. -->
+                @if (form.invoice.parseWarning && form.status === 'pending') {
+                  <div style="background:#fff5f5;border:1px solid #fca5a5;border-radius:8px;padding:10px 12px;color:#991b1b;font-size:12px;margin-bottom:10px;display:flex;gap:8px;align-items:flex-start;">
+                    <span class="material-icons-round" style="font-size:18px;color:#dc2626;">warning_amber</span>
+                    <div>
+                      <p style="font-weight:700;margin:0 0 2px;">This PDF didn't read cleanly</p>
+                      <p style="margin:0;">{{ form.invoice.parseWarning }}</p>
+                      @if (!form.include) {
+                        <p style="margin:4px 0 0;">It's unticked for now. Tick it to review the rows.</p>
+                      }
+                    </div>
+                  </div>
+                }
+
                 @if (form.include && form.status === 'pending') {
                   <!-- Customer -->
                   <div style="margin-bottom:10px;">
@@ -325,7 +340,9 @@ export class PdfImportModalComponent {
                 ? `Invoice ${inv.invoiceNumber} already exists and is marked DISPATCHED. Importing will overwrite its items.`
                 : `Invoice ${inv.invoiceNumber} already exists. Importing will overwrite its items.`)
             : '',
-          include: true,   // default checked
+          // Default checked, unless the parse sanity check failed. Then the user
+          // has to tick it deliberately after comparing rows with the PDF.
+          include: !inv.parseWarning,
           status: 'pending',
           errorMsg: '',
         };
